@@ -214,9 +214,10 @@ async function broadcastSnapshot() {
   if (
     usdcBalance >= AUTO_START_THRESHOLD &&
     botStatus === 'stopped' &&
-    !manuallyStopped &&
-    botError === null
+    !manuallyStopped
   ) {
+    // Clear any auto-stop error so the bot can restart cleanly
+    botError = null;
     console.log(`✅ Balance $${balances.usdc} ≥ $${AUTO_START_THRESHOLD} threshold. Auto-starting bot.`);
     startBot();
   }
