@@ -153,19 +153,31 @@ try {
   walletAddress = new ethers.Wallet(config.privateKey).address;
 } catch {}
 
+// Fallback public RPCs if QuikNode times out
+const FALLBACK_RPCS = [
+  config.rpcUrl,
+  'https://polygon-rpc.com',
+  'https://rpc.ankr.com/polygon',
+  'https://polygon.llamarpc.com',
+];
+
 async function getBalances(): Promise<{ pol: string; usdc: string }> {
-  try {
-    const provider = new ethers.providers.JsonRpcProvider(config.rpcUrl);
-    const [polBal, usdcBal] = await Promise.all([
-      provider.getBalance(walletAddress),
-      new ethers.Contract(config.contracts.usdc, ERC20_ABI, provider).balanceOf(walletAddress),
-    ]);
-    return {
-      pol: parseFloat(ethers.utils.formatEther(polBal)).toFixed(4),
-      usdc: parseFloat(ethers.utils.formatUnits(usdcBal, 6)).toFixed(2),
-    };
-  } catch {
-    return { pol: '0', usdc: '0' };
+  for (const rpc of FALLBACK_RPCS) {
+    try {
+      const provider = new ethers.providers.JsonRpcProvider(rpc);
+      const [polBal, usdcBal] = await Promise.all([
+        provider.getBalance(walletAddress),
+        new ethers.Contract(config.contracts.usdc, ERC20_ABI, provider).balanceOf(walletAddress),
+      ]);
+      return {
+        pol: parseFloat(ethers.utils.formatEther(polBal)).toFixed(4),
+        usdc: parseFloat(ethers.utils.formatUnits(usdcBal, 6)).toFixed(2),
+      };
+    } catch {
+      // try next RPC
+    }
+  }
+  return { pol: '—', usdc: '—' };
   }
 }
 
