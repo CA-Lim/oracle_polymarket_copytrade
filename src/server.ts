@@ -178,7 +178,6 @@ async function getBalances(): Promise<{ pol: string; usdc: string }> {
     }
   }
   return { pol: '—', usdc: '—' };
-  }
 }
 
 async function getPositions(): Promise<any[]> {
