@@ -77,12 +77,54 @@ let accountSummary: AccountSummary = {
   totalReturned: 0, tradingPnl: 0, tradeCount: 0, redeemCount: 0,
 };
 
+// Known Polymarket contract addresses (lowercase) — outgoing USDC to these is NOT a withdrawal
+const POLYMARKET_CONTRACTS = new Set([
+  '0x4bfb41d5b3570defd03c39a9a4d8de6bd8b8982e', // exchange
+  '0x4d97dcd97ec945f40cf65f87097ace5ea0476045', // ctf
+  '0xd91e80cf2e7be2e162c6513ced06f1dd0da35296', // negRiskAdapter
+  '0xc5d563a36ae78145c45a50134d48a1215220f80a', // negRiskExchange
+]);
+
+// Fetch all USDC.e transfers to/from wallet via Polygonscan
+// incoming  → deposits
+// outgoing to non-Polymarket address → withdrawals
+async function fetchUsdcTransfers(): Promise<{ deposited: number; withdrawn: number }> {
+  if (!walletAddress) return { deposited: 0, withdrawn: 0 };
+  const apiKey = process.env.POLYGONSCAN_API_KEY ?? '';
+  const url = `https://api.polygonscan.com/api?module=account&action=tokentx` +
+    `&contractaddress=${config.contracts.usdc}` +
+    `&address=${walletAddress}` +
+    `&sort=asc` +
+    (apiKey ? `&apikey=${apiKey}` : '');
+  const res = await fetch(url);
+  const data = await res.json() as any;
+  if (data.status !== '1' || !Array.isArray(data.result)) return { deposited: 0, withdrawn: 0 };
+  let deposited = 0;
+  let withdrawn = 0;
+  const wallet = walletAddress.toLowerCase();
+  for (const tx of data.result as any[]) {
+    const amount = parseFloat(tx.value) / 1e6; // USDC.e has 6 decimals
+    if (isNaN(amount)) continue;
+    if (tx.to.toLowerCase() === wallet) {
+      deposited += amount;
+    } else if (
+      tx.from.toLowerCase() === wallet &&
+      !POLYMARKET_CONTRACTS.has(tx.to.toLowerCase())
+    ) {
+      withdrawn += amount;
+    }
+  }
+  return { deposited, withdrawn };
+}
+
 async function fetchAccountSummary(): Promise<void> {
   if (!walletAddress) return;
   const summary: AccountSummary = {
     totalDeposited: 0, totalWithdrawn: 0, totalInvested: 0,
     totalReturned: 0, tradingPnl: 0, tradeCount: 0, redeemCount: 0,
   };
+
+  // ── Polymarket activity: trades + redeems ──────────────────────────────
   let offset = 0;
   const limit = 500;
   while (true) {
@@ -102,10 +144,6 @@ async function fetchAccountSummary(): Promise<void> {
         } else if (r.type === 'REDEEM') {
           summary.totalReturned += amt;
           summary.redeemCount++;
-        } else if (r.type === 'DEPOSIT') {
-          summary.totalDeposited += amt;
-        } else if (r.type === 'WITHDRAWAL') {
-          summary.totalWithdrawn += amt;
         }
       }
       if (records.length < limit) break;
@@ -114,6 +152,16 @@ async function fetchAccountSummary(): Promise<void> {
       break;
     }
   }
+
+  // ── Polygonscan: USDC.e transfers = deposits & withdrawals ────────────
+  try {
+    const { deposited, withdrawn } = await fetchUsdcTransfers();
+    summary.totalDeposited = deposited;
+    summary.totalWithdrawn = withdrawn;
+  } catch {
+    // leave at 0 if Polygonscan is unavailable
+  }
+
   summary.tradingPnl = summary.totalReturned - summary.totalInvested;
   accountSummary = summary;
 }
