@@ -97,19 +97,26 @@ const USDC_CONTRACTS = new Set([
 async function fetchUsdcTransfers(): Promise<{ deposited: number; withdrawn: number }> {
   if (!walletAddress) return { deposited: 0, withdrawn: 0 };
   const apiKey = process.env.POLYGONSCAN_API_KEY ?? '';
-  // Etherscan V2 API (Polygonscan V1 is deprecated) — chainid=137 = Polygon
-  const url = `https://api.etherscan.io/v2/api?chainid=137&module=account&action=tokentx` +
-    `&address=${walletAddress}` +
-    `&sort=asc` +
-    (apiKey ? `&apikey=${apiKey}` : '');
-  const res = await fetch(url);
-  const data = await res.json() as any;
-  console.log(`📊 Polygonscan tokentx: status=${data.status} message=${data.message} records=${Array.isArray(data.result) ? data.result.length : 'n/a'}`);
-  if (data.status !== '1' || !Array.isArray(data.result)) return { deposited: 0, withdrawn: 0 };
+  // Fetch all pages (Etherscan returns max 10000 per page)
+  const allTxs: any[] = [];
+  let page = 1;
+  while (true) {
+    const url = `https://api.etherscan.io/v2/api?chainid=137&module=account&action=tokentx` +
+      `&address=${walletAddress}&sort=asc&page=${page}&offset=10000` +
+      (apiKey ? `&apikey=${apiKey}` : '');
+    const res = await fetch(url);
+    const data = await res.json() as any;
+    console.log(`📊 Polygonscan tokentx page ${page}: status=${data.status} message=${data.message} records=${Array.isArray(data.result) ? data.result.length : 'n/a'}`);
+    if (data.status !== '1' || !Array.isArray(data.result) || data.result.length === 0) break;
+    allTxs.push(...data.result);
+    if (data.result.length < 10000) break; // last page
+    page++;
+  }
+  if (allTxs.length === 0) return { deposited: 0, withdrawn: 0 };
   let deposited = 0;
   let withdrawn = 0;
   const wallet = walletAddress.toLowerCase();
-  for (const tx of data.result as any[]) {
+  for (const tx of allTxs) {
     // Only count USDC / USDC.e transfers
     if (!USDC_CONTRACTS.has(tx.contractAddress?.toLowerCase())) continue;
     const decimals = parseInt(tx.tokenDecimal ?? '6');
