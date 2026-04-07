@@ -113,27 +113,39 @@ async function fetchUsdcTransfers(): Promise<{ deposited: number; withdrawn: num
     page++;
   }
   if (allTxs.length === 0) return { deposited: 0, withdrawn: 0 };
+  const wallet = walletAddress.toLowerCase();
+
+  // Identify "swap" tx hashes — same tx has BOTH incoming and outgoing USDC variants.
+  // e.g. swap-usdc-to-usdce.ts sends USDC and receives USDC.e in one tx.
+  // Both sides should be excluded: it's a currency conversion, not a deposit or withdrawal.
+  const hasIncoming = new Set<string>();
+  const hasOutgoing = new Set<string>();
+  for (const tx of allTxs) {
+    if (!USDC_CONTRACTS.has(tx.contractAddress?.toLowerCase())) continue;
+    if (tx.to.toLowerCase() === wallet) hasIncoming.add(tx.hash);
+    else if (tx.from.toLowerCase() === wallet) hasOutgoing.add(tx.hash);
+  }
+  const swapHashes = new Set([...hasOutgoing].filter(h => hasIncoming.has(h)));
+
   let deposited = 0;
   let withdrawn = 0;
-  const wallet = walletAddress.toLowerCase();
   for (const tx of allTxs) {
-    // Only count USDC / USDC.e transfers
     if (!USDC_CONTRACTS.has(tx.contractAddress?.toLowerCase())) continue;
     const decimals = parseInt(tx.tokenDecimal ?? '6');
     const amount = parseFloat(tx.value) / Math.pow(10, decimals);
     if (isNaN(amount)) continue;
-    if (tx.to.toLowerCase() === wallet &&
-        !POLYMARKET_CONTRACTS.has(tx.from.toLowerCase())) {
-      // Only count as deposit if it came from outside Polymarket (not a redemption payout)
+
+    if (swapHashes.has(tx.hash)) {
+      // Both sides of a USDC ↔ USDC.e swap — skip entirely
+      console.log(`  🔄 Swap     $${amount.toFixed(2)} ${tx.tokenSymbol} (excluded — currency conversion)`);
+      continue;
+    }
+    if (tx.to.toLowerCase() === wallet && !POLYMARKET_CONTRACTS.has(tx.from.toLowerCase())) {
       deposited += amount;
       console.log(`  ↓ Deposit  +$${amount.toFixed(2)} ${tx.tokenSymbol} from ${tx.from.slice(0,10)}… (tx: ${tx.hash.slice(0,12)}…)`);
-    } else if (tx.to.toLowerCase() === wallet &&
-               POLYMARKET_CONTRACTS.has(tx.from.toLowerCase())) {
+    } else if (tx.to.toLowerCase() === wallet && POLYMARKET_CONTRACTS.has(tx.from.toLowerCase())) {
       console.log(`  ↩ Redeem   +$${amount.toFixed(2)} ${tx.tokenSymbol} from Polymarket (excluded from deposits)`);
-    } else if (
-      tx.from.toLowerCase() === wallet &&
-      !POLYMARKET_CONTRACTS.has(tx.to.toLowerCase())
-    ) {
+    } else if (tx.from.toLowerCase() === wallet && !POLYMARKET_CONTRACTS.has(tx.to.toLowerCase())) {
       withdrawn += amount;
       console.log(`  ↑ Withdraw -$${amount.toFixed(2)} ${tx.tokenSymbol} to   ${tx.to.slice(0,10)}… (tx: ${tx.hash.slice(0,12)}…)`);
     }
