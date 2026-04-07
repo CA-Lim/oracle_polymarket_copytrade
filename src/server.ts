@@ -115,9 +115,14 @@ async function fetchUsdcTransfers(): Promise<{ deposited: number; withdrawn: num
     const decimals = parseInt(tx.tokenDecimal ?? '6');
     const amount = parseFloat(tx.value) / Math.pow(10, decimals);
     if (isNaN(amount)) continue;
-    if (tx.to.toLowerCase() === wallet) {
+    if (tx.to.toLowerCase() === wallet &&
+        !POLYMARKET_CONTRACTS.has(tx.from.toLowerCase())) {
+      // Only count as deposit if it came from outside Polymarket (not a redemption payout)
       deposited += amount;
       console.log(`  ↓ Deposit  +$${amount.toFixed(2)} ${tx.tokenSymbol} from ${tx.from.slice(0,10)}… (tx: ${tx.hash.slice(0,12)}…)`);
+    } else if (tx.to.toLowerCase() === wallet &&
+               POLYMARKET_CONTRACTS.has(tx.from.toLowerCase())) {
+      console.log(`  ↩ Redeem   +$${amount.toFixed(2)} ${tx.tokenSymbol} from Polymarket (excluded from deposits)`);
     } else if (
       tx.from.toLowerCase() === wallet &&
       !POLYMARKET_CONTRACTS.has(tx.to.toLowerCase())
