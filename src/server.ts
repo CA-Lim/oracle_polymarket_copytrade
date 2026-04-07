@@ -97,8 +97,8 @@ const USDC_CONTRACTS = new Set([
 async function fetchUsdcTransfers(): Promise<{ deposited: number; withdrawn: number }> {
   if (!walletAddress) return { deposited: 0, withdrawn: 0 };
   const apiKey = process.env.POLYGONSCAN_API_KEY ?? '';
-  // No contractaddress filter — fetch ALL ERC20 transfers then filter by USDC contract
-  const url = `https://api.polygonscan.com/api?module=account&action=tokentx` +
+  // Etherscan V2 API (Polygonscan V1 is deprecated) — chainid=137 = Polygon
+  const url = `https://api.etherscan.io/v2/api?chainid=137&module=account&action=tokentx` +
     `&address=${walletAddress}` +
     `&sort=asc` +
     (apiKey ? `&apikey=${apiKey}` : '');
