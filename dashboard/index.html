@@ -99,8 +99,69 @@
     </span>
   </div>
 
-  <!-- ── SUMMARY CARDS ──────────────────────────────────────────────────── -->
-  <div class="px-6 pt-5 pb-3 grid grid-cols-2 md:grid-cols-4 gap-3">
+  <!-- ── ALL-TIME ACCOUNT P&L ─────────────────────────────────────────────── -->
+  <div class="px-6 pt-5 pb-1">
+    <p class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">All-Time Account</p>
+    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+
+      <div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
+        <p class="text-xs text-gray-500 mb-1">Deposited</p>
+        <p class="text-xl font-bold text-white"
+           x-text="'$' + (data.accountSummary?.totalDeposited ?? 0).toFixed(2)"></p>
+      </div>
+
+      <div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
+        <p class="text-xs text-gray-500 mb-1">Withdrawn</p>
+        <p class="text-xl font-bold text-white"
+           x-text="'$' + (data.accountSummary?.totalWithdrawn ?? 0).toFixed(2)"></p>
+      </div>
+
+      <div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
+        <p class="text-xs text-gray-500 mb-1">Total Spent</p>
+        <p class="text-xl font-bold text-white"
+           x-text="'$' + (data.accountSummary?.totalInvested ?? 0).toFixed(2)"></p>
+        <p class="text-xs text-gray-600 mt-0.5"
+           x-text="(data.accountSummary?.tradeCount ?? 0) + ' trades'"></p>
+      </div>
+
+      <div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
+        <p class="text-xs text-gray-500 mb-1">Total Returned</p>
+        <p class="text-xl font-bold text-white"
+           x-text="'$' + (data.accountSummary?.totalReturned ?? 0).toFixed(2)"></p>
+        <p class="text-xs text-gray-600 mt-0.5"
+           x-text="(data.accountSummary?.redeemCount ?? 0) + ' redeems'"></p>
+      </div>
+
+      <div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
+        <p class="text-xs text-gray-500 mb-1">Realized P&L</p>
+        <p class="text-xl font-bold"
+           :class="(data.accountSummary?.tradingPnl ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'"
+           x-text="((data.accountSummary?.tradingPnl ?? 0) >= 0 ? '+$' : '-$') + Math.abs(data.accountSummary?.tradingPnl ?? 0).toFixed(2)">
+        </p>
+        <p class="text-xs text-gray-600 mt-0.5">on settled trades</p>
+      </div>
+
+      <div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
+        <p class="text-xs text-gray-500 mb-1">Net Cash Flow</p>
+        <template x-if="(data.accountSummary?.totalDeposited ?? 0) > 0">
+          <div>
+            <p class="text-xl font-bold"
+               :class="((data.accountSummary?.totalWithdrawn ?? 0) + (data.accountSummary?.tradingPnl ?? 0)) >= 0 ? 'text-green-400' : 'text-red-400'"
+               x-text="(((data.accountSummary?.totalWithdrawn ?? 0) + (data.accountSummary?.tradingPnl ?? 0)) >= 0 ? '+$' : '-$') + Math.abs((data.accountSummary?.totalWithdrawn ?? 0) + (data.accountSummary?.tradingPnl ?? 0)).toFixed(2)">
+            </p>
+            <p class="text-xs text-gray-600 mt-0.5">withdrawn + P&L</p>
+          </div>
+        </template>
+        <template x-if="(data.accountSummary?.totalDeposited ?? 0) === 0">
+          <p class="text-xl font-bold text-gray-600">—</p>
+        </template>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── LIVE SESSION CARDS ─────────────────────────────────────────────────── -->
+  <div class="px-6 pt-4 pb-3 grid grid-cols-2 md:grid-cols-4 gap-3">
 
     <div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
       <p class="text-xs text-gray-500 mb-1">Positions Value</p>
@@ -212,11 +273,11 @@
       </div>
     </div>
 
-    <!-- ── SESSION TRADE LOG ─────────────────────────────────────────────── -->
+    <!-- ── TRADE HISTORY ──────────────────────────────────────────────────── -->
     <div class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
       <div class="px-4 py-3 border-b border-gray-800 flex items-center justify-between">
-        <h2 class="font-semibold text-white">Session Trade Log</h2>
-        <span class="text-xs text-gray-500" x-text="(data.recentTrades?.length ?? 0) + ' trades'"></span>
+        <h2 class="font-semibold text-white">Trade History</h2>
+        <span class="text-xs text-gray-500" x-text="(data.recentTrades?.length ?? 0) + ' trades (last 100)'"></span>
       </div>
       <div class="overflow-x-auto">
         <table class="w-full">
@@ -227,6 +288,7 @@
               <th class="px-4 py-2.5 text-left font-medium">Side</th>
               <th class="px-4 py-2.5 text-right font-medium">Original</th>
               <th class="px-4 py-2.5 text-right font-medium">Copied</th>
+              <th class="px-4 py-2.5 text-right font-medium">Entry Cost</th>
               <th class="px-4 py-2.5 text-right font-medium">Price</th>
               <th class="px-4 py-2.5 text-right font-medium">Shares</th>
               <th class="px-4 py-2.5 text-center font-medium">Result</th>
@@ -235,12 +297,12 @@
           <tbody>
             <template x-if="!data.recentTrades || data.recentTrades.length === 0">
               <tr>
-                <td colspan="8" class="px-4 py-10 text-center text-gray-600">No trades this session</td>
+                <td colspan="9" class="px-4 py-10 text-center text-gray-600">No trade history</td>
               </tr>
             </template>
             <template x-for="t in (data.recentTrades ?? [])" :key="t.id">
               <tr class="border-t border-gray-800/60 hover:bg-gray-800/20 transition-colors fade-in">
-                <td class="px-4 py-2.5 text-gray-500 font-mono whitespace-nowrap" x-text="fmtTime(t.timestamp)"></td>
+                <td class="px-4 py-2.5 text-gray-500 font-mono whitespace-nowrap" x-text="fmtDate(t.timestamp)"></td>
                 <td class="px-4 py-2.5 text-gray-300 max-w-xs">
                   <span class="block truncate" :title="t.market" x-text="t.market || (t.tokenId?.slice(0, 12) + '…')"></span>
                   <span x-show="t.outcome" class="text-xs text-gray-500" x-text="t.outcome"></span>
@@ -256,6 +318,9 @@
                 <td class="px-4 py-2.5 text-right font-semibold font-mono"
                     :class="t.status === 'filled' ? 'text-white' : 'text-gray-500'"
                     x-text="t.status === 'filled' ? '$' + Number(t.copySize).toFixed(2) : '—'"></td>
+                <td class="px-4 py-2.5 text-right font-mono"
+                    :class="t.entryCost ? 'text-blue-400' : 'text-gray-600'"
+                    x-text="(t.entryCost && t.side === 'BUY' && t.status === 'filled') ? '$' + Number(t.entryCost).toFixed(2) : '—'"></td>
                 <td class="px-4 py-2.5 text-right text-gray-400 font-mono" x-text="'$' + Number(t.price).toFixed(3)"></td>
                 <td class="px-4 py-2.5 text-right text-gray-400 font-mono"
                     x-text="t.status === 'filled' ? Number(t.shares).toFixed(3) : '—'"></td>
@@ -325,6 +390,11 @@
           positions: [],
           sessionStats: { tradesDetected: 0, tradesCopied: 0, tradesFailed: 0, totalVolume: 0 },
           recentTrades: [],
+          accountSummary: {
+            totalDeposited: 0, totalWithdrawn: 0,
+            totalInvested: 0, totalReturned: 0,
+            tradingPnl: 0, tradeCount: 0, redeemCount: 0,
+          },
           config: {},
         },
         settings: { minTradeSize: 1, maxTradeSize: 5, positionMultiplier: 0.1 },
@@ -458,6 +528,15 @@
         fmtTime(ts) {
           if (!ts) return '—';
           return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        },
+        fmtDate(ts) {
+          if (!ts) return '—';
+          const d = new Date(ts);
+          const today = new Date();
+          const isToday = d.toDateString() === today.toDateString();
+          if (isToday) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+          return d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' +
+                 d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         },
       };
     }

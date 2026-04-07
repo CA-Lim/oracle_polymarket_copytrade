@@ -56,14 +56,100 @@ interface TradeRecord {
   shares: number;
   status: 'filled' | 'failed';
   failReason?: string;
+  entryCost?: number;    // USDC actually spent (= copySize for filled BUYs)
+  conditionId?: string;  // links trade to redemption event
 }
 
+// ─── Account summary (from Polymarket activity API) ──────────────────────────
+
+interface AccountSummary {
+  totalDeposited: number;  // USDC deposited into the account (all-time)
+  totalWithdrawn: number;  // USDC withdrawn from the account (all-time)
+  totalInvested: number;   // USDC spent on BUY trades (all-time)
+  totalReturned: number;   // USDC received from REDEEMs (all-time)
+  tradingPnl: number;      // totalReturned - totalInvested (realized trading P&L)
+  tradeCount: number;      // total BUY trades counted
+  redeemCount: number;     // total redeems counted
+}
+
+let accountSummary: AccountSummary = {
+  totalDeposited: 0, totalWithdrawn: 0, totalInvested: 0,
+  totalReturned: 0, tradingPnl: 0, tradeCount: 0, redeemCount: 0,
+};
+
+async function fetchAccountSummary(): Promise<void> {
+  if (!walletAddress) return;
+  const summary: AccountSummary = {
+    totalDeposited: 0, totalWithdrawn: 0, totalInvested: 0,
+    totalReturned: 0, tradingPnl: 0, tradeCount: 0, redeemCount: 0,
+  };
+  let offset = 0;
+  const limit = 500;
+  while (true) {
+    try {
+      const res = await fetch(
+        `https://data-api.polymarket.com/activity?user=${walletAddress}&limit=${limit}&offset=${offset}`
+      );
+      if (!res.ok) break;
+      const records: any[] = await res.json();
+      if (!Array.isArray(records) || records.length === 0) break;
+      for (const r of records) {
+        const amt = parseFloat(r.amount ?? r.usdcSize ?? 0);
+        if (isNaN(amt)) continue;
+        if (r.type === 'TRADE' && r.side === 'BUY') {
+          summary.totalInvested += amt;
+          summary.tradeCount++;
+        } else if (r.type === 'REDEEM') {
+          summary.totalReturned += amt;
+          summary.redeemCount++;
+        } else if (r.type === 'DEPOSIT') {
+          summary.totalDeposited += amt;
+        } else if (r.type === 'WITHDRAWAL') {
+          summary.totalWithdrawn += amt;
+        }
+      }
+      if (records.length < limit) break;
+      offset += limit;
+    } catch {
+      break;
+    }
+  }
+  summary.tradingPnl = summary.totalReturned - summary.totalInvested;
+  accountSummary = summary;
+}
+
+// ─── Persistent trade history ────────────────────────────────────────────────
+
+const DATA_PATH = path.join(__dirname, '..', 'data', 'trades.json');
 const tradeHistory: TradeRecord[] = [];
-const MAX_HISTORY = 200;
+const MAX_HISTORY = 500;
+
+async function loadTradeHistory(): Promise<void> {
+  try {
+    const raw = await fs.readFile(DATA_PATH, 'utf-8');
+    const records: TradeRecord[] = JSON.parse(raw);
+    if (Array.isArray(records)) {
+      tradeHistory.push(...records.slice(0, MAX_HISTORY));
+    }
+    console.log(`📂 Loaded ${tradeHistory.length} trade records from disk`);
+  } catch {
+    // File doesn't exist yet — start fresh
+  }
+}
+
+async function saveTradeHistory(): Promise<void> {
+  try {
+    await fs.mkdir(path.dirname(DATA_PATH), { recursive: true });
+    await fs.writeFile(DATA_PATH, JSON.stringify(tradeHistory, null, 2), 'utf-8');
+  } catch (e: any) {
+    console.error('⚠️  Failed to save trade history:', e.message);
+  }
+}
 
 function addToHistory(record: TradeRecord) {
   tradeHistory.unshift(record);
   if (tradeHistory.length > MAX_HISTORY) tradeHistory.pop();
+  saveTradeHistory().catch(() => {}); // fire-and-forget
 }
 
 // ─── Bot state ───────────────────────────────────────────────────────────────
@@ -96,6 +182,8 @@ async function startBot() {
       price: result.price,
       shares: result.copyShares,
       status: 'filled',
+      entryCost: result.copyNotional,
+      conditionId: result.conditionId ?? trade.conditionId ?? '',
     });
     broadcastSnapshot();
   };
@@ -244,7 +332,8 @@ async function broadcastSnapshot() {
     manuallyStopped,
     positions,
     sessionStats: stats,
-    recentTrades: tradeHistory.slice(0, 50),
+    recentTrades: tradeHistory.slice(0, 100),
+    accountSummary,
     config: {
       targetWallet: config.targetWallet,
       minTradeSize: config.trading.minTradeSize,
@@ -381,9 +470,14 @@ const server = http.createServer(async (req, res) => {
 
     // GET /api/history
     if (req.method === 'GET' && pathname === '/api/history') {
-      const limit = Math.min(parseInt(url.searchParams.get('limit') || '50'), 200);
+      const limit = Math.min(parseInt(url.searchParams.get('limit') || '50'), 500);
       const offset = parseInt(url.searchParams.get('offset') || '0');
       return json(res, 200, { trades: tradeHistory.slice(offset, offset + limit), total: tradeHistory.length });
+    }
+
+    // GET /api/account-summary
+    if (req.method === 'GET' && pathname === '/api/account-summary') {
+      return json(res, 200, accountSummary);
     }
 
     // GET /api/config
@@ -512,7 +606,8 @@ wss.on('connection', async (ws, req) => {
     balances,
     positions,
     sessionStats: stats,
-    recentTrades: tradeHistory.slice(0, 50),
+    recentTrades: tradeHistory.slice(0, 100),
+    accountSummary,
     config: {
       targetWallet: config.targetWallet,
       minTradeSize: config.trading.minTradeSize,
@@ -570,7 +665,14 @@ setInterval(autoRedeem, 30_000); // check every 30s
 // Broadcast snapshot every 5 seconds
 setInterval(broadcastSnapshot, 5000);
 
+// Refresh account summary every 5 minutes
+setInterval(() => fetchAccountSummary().catch(console.error), 5 * 60 * 1000);
+
 // ─── Start ────────────────────────────────────────────────────────────────────
+
+// Load persisted trade history + warm account summary before accepting connections
+await loadTradeHistory();
+fetchAccountSummary().catch(console.error);
 
 server.listen(PORT, () => {
   console.log(`\n📊 Dashboard: http://localhost:${PORT}`);
