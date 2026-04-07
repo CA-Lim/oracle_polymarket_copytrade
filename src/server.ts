@@ -85,35 +85,48 @@ const POLYMARKET_CONTRACTS = new Set([
   '0xc5d563a36ae78145c45a50134d48a1215220f80a', // negRiskExchange
 ]);
 
-// Fetch all USDC.e transfers to/from wallet via Polygonscan
-// incoming  → deposits
+// USDC contract addresses on Polygon (both variants)
+const USDC_CONTRACTS = new Set([
+  '0x2791bca1f2de4661ed88a30c99a7a9449aa84174', // USDC.e (bridged)
+  '0x3c499c542cef5e3811e1192ce70d8cc03d5c3359', // USDC (native)
+]);
+
+// Fetch all ERC20 transfers to/from wallet via Polygonscan, filter for USDC tokens.
+// incoming to wallet  → deposits
 // outgoing to non-Polymarket address → withdrawals
 async function fetchUsdcTransfers(): Promise<{ deposited: number; withdrawn: number }> {
   if (!walletAddress) return { deposited: 0, withdrawn: 0 };
   const apiKey = process.env.POLYGONSCAN_API_KEY ?? '';
+  // No contractaddress filter — fetch ALL ERC20 transfers then filter by USDC contract
   const url = `https://api.polygonscan.com/api?module=account&action=tokentx` +
-    `&contractaddress=${config.contracts.usdc}` +
     `&address=${walletAddress}` +
     `&sort=asc` +
     (apiKey ? `&apikey=${apiKey}` : '');
   const res = await fetch(url);
   const data = await res.json() as any;
+  console.log(`📊 Polygonscan tokentx: status=${data.status} message=${data.message} records=${Array.isArray(data.result) ? data.result.length : 'n/a'}`);
   if (data.status !== '1' || !Array.isArray(data.result)) return { deposited: 0, withdrawn: 0 };
   let deposited = 0;
   let withdrawn = 0;
   const wallet = walletAddress.toLowerCase();
   for (const tx of data.result as any[]) {
-    const amount = parseFloat(tx.value) / 1e6; // USDC.e has 6 decimals
+    // Only count USDC / USDC.e transfers
+    if (!USDC_CONTRACTS.has(tx.contractAddress?.toLowerCase())) continue;
+    const decimals = parseInt(tx.tokenDecimal ?? '6');
+    const amount = parseFloat(tx.value) / Math.pow(10, decimals);
     if (isNaN(amount)) continue;
     if (tx.to.toLowerCase() === wallet) {
       deposited += amount;
+      console.log(`  ↓ Deposit  +$${amount.toFixed(2)} ${tx.tokenSymbol} from ${tx.from.slice(0,10)}… (tx: ${tx.hash.slice(0,12)}…)`);
     } else if (
       tx.from.toLowerCase() === wallet &&
       !POLYMARKET_CONTRACTS.has(tx.to.toLowerCase())
     ) {
       withdrawn += amount;
+      console.log(`  ↑ Withdraw -$${amount.toFixed(2)} ${tx.tokenSymbol} to   ${tx.to.slice(0,10)}… (tx: ${tx.hash.slice(0,12)}…)`);
     }
   }
+  console.log(`📊 Transfers summary: deposited=$${deposited.toFixed(2)} withdrawn=$${withdrawn.toFixed(2)}`);
   return { deposited, withdrawn };
 }
 
