@@ -426,6 +426,8 @@ async function broadcastSnapshot() {
       positionMultiplier: config.trading.positionSizeMultiplier,
       orderType: config.trading.orderType,
       slippageTolerance: config.trading.slippageTolerance,
+      maxPerMarketNotional: config.risk.maxPerMarketNotional,
+      maxSessionNotional: config.risk.maxSessionNotional,
     },
   });
 }
@@ -710,6 +712,8 @@ wss.on('connection', async (ws, req) => {
       positionMultiplier: config.trading.positionSizeMultiplier,
       orderType: config.trading.orderType,
       slippageTolerance: config.trading.slippageTolerance,
+      maxPerMarketNotional: config.risk.maxPerMarketNotional,
+      maxSessionNotional: config.risk.maxSessionNotional,
     },
   }));
 });
