@@ -358,6 +358,16 @@
             <span class="text-xs text-gray-500" x-text="(settings.positionMultiplier * 100).toFixed(0) + '%'"></span>
           </div>
         </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1.5">Max Per-Market ($)</label>
+          <input x-model.number="settings.maxPerMarketNotional" type="number" min="0" step="1" placeholder="0 = no limit"
+                 class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm w-32 placeholder-gray-600 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30 transition">
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1.5">Max Session ($)</label>
+          <input x-model.number="settings.maxSessionNotional" type="number" min="0" step="1" placeholder="0 = no limit"
+                 class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm w-32 placeholder-gray-600 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30 transition">
+        </div>
         <button @click="saveSettings"
                 class="px-5 py-2 rounded-lg text-white text-sm font-semibold transition"
                 :class="saved ? 'bg-green-600' : 'bg-blue-600 hover:bg-blue-700'">
@@ -397,7 +407,7 @@
           },
           config: {},
         },
-        settings: { minTradeSize: 1, maxTradeSize: 5, positionMultiplier: 0.1 },
+        settings: { minTradeSize: 1, maxTradeSize: 5, positionMultiplier: 0.1, maxPerMarketNotional: 0, maxSessionNotional: 0 },
         saved: false,
         saveError: '',
         wsConnected: false,
@@ -443,6 +453,8 @@
                 this.settings.minTradeSize = msg.config.minTradeSize;
                 this.settings.maxTradeSize = msg.config.maxTradeSize;
                 this.settings.positionMultiplier = msg.config.positionMultiplier;
+                this.settings.maxPerMarketNotional = msg.config.maxPerMarketNotional ?? 0;
+                this.settings.maxSessionNotional   = msg.config.maxSessionNotional   ?? 0;
               }
               this.lastUpdate = new Date().toLocaleTimeString();
             } else if (msg.type === 'status') {
@@ -486,6 +498,8 @@
                 minTradeSize: String(this.settings.minTradeSize),
                 maxTradeSize: String(this.settings.maxTradeSize),
                 positionMultiplier: String(this.settings.positionMultiplier),
+                maxPerMarketNotional: String(this.settings.maxPerMarketNotional),
+                maxSessionNotional:   String(this.settings.maxSessionNotional),
               }),
             });
             if (r.ok) {

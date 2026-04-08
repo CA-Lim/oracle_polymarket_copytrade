@@ -574,6 +574,8 @@ const server = http.createServer(async (req, res) => {
         positionMultiplier: config.trading.positionSizeMultiplier,
         orderType: config.trading.orderType,
         slippageTolerance: config.trading.slippageTolerance,
+        maxPerMarketNotional: config.risk.maxPerMarketNotional,
+        maxSessionNotional: config.risk.maxSessionNotional,
       });
     }
 
@@ -606,6 +608,14 @@ const server = http.createServer(async (req, res) => {
       if (body.positionMultiplier !== undefined) {
         config.trading.positionSizeMultiplier = parseFloat(body.positionMultiplier);
         envUpdates['POSITION_MULTIPLIER'] = String(body.positionMultiplier);
+      }
+      if (body.maxPerMarketNotional !== undefined) {
+        config.risk.maxPerMarketNotional = parseFloat(body.maxPerMarketNotional);
+        envUpdates['MAX_PER_MARKET_NOTIONAL'] = String(body.maxPerMarketNotional);
+      }
+      if (body.maxSessionNotional !== undefined) {
+        config.risk.maxSessionNotional = parseFloat(body.maxSessionNotional);
+        envUpdates['MAX_SESSION_NOTIONAL'] = String(body.maxSessionNotional);
       }
 
       await updateEnv(envUpdates);
