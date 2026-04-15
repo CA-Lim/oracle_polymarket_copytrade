@@ -10,6 +10,11 @@ const useWebSocket = process.env.USE_WEBSOCKET !== 'false';
 
 export const config = {
   targetWallet: process.env.TARGET_WALLET || '',
+  anthropicApiKey: process.env.ANTHROPIC_API_KEY || '',
+  aiReviewCron: process.env.AI_REVIEW_CRON || '0 2 * * *',
+  aiMaxCopyTargets: parseInt(process.env.AI_MAX_COPY_TARGETS || '10'),
+  discoveryRefreshCron: process.env.DISCOVERY_REFRESH_CRON || '0 3 * * 0',
+  discoveryRefreshLimit: parseInt(process.env.DISCOVERY_REFRESH_LIMIT || '200'),
   privateKey: process.env.PRIVATE_KEY || '',
   polymarketGeoToken: process.env.POLYMARKET_GEO_TOKEN || '',
   rpcUrl: process.env.RPC_URL || 'https://polygon-rpc.com',
@@ -44,7 +49,16 @@ export const config = {
     useUserChannel: process.env.USE_USER_CHANNEL === 'true',
     wsAssetIds: parseCsv(process.env.WS_ASSET_IDS),
     wsMarketIds: parseCsv(process.env.WS_MARKET_IDS),
-  }
+  },
+
+  // Market keyword filters (case-insensitive, applied to market question/title).
+  // BLOCK: skip any trade whose market contains any of these words.
+  // ALLOW: if non-empty, ONLY copy trades whose market matches at least one word.
+  // Both can be set simultaneously — ALLOW is evaluated first, then BLOCK.
+  filters: {
+    blockKeywords: parseCsv(process.env.MARKET_BLOCK_KEYWORDS),
+    allowKeywords: parseCsv(process.env.MARKET_ALLOW_KEYWORDS),
+  },
 };
 
 export function validateConfig(): void {

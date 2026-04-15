@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Oracle P1 — Trader Discovery</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+  <style>
+    body { background: #030712; }
+    .fade-in { animation: fadeIn .3s ease; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+    ::-webkit-scrollbar { width: 4px; height: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #374151; border-radius: 2px; }
+  </style>
+</head>
+<body class="text-gray-100 min-h-screen text-sm" x-data="app()" x-init="init()">
+
+  <!-- ── HEADER ─────────────────────────────────────────────────────────── -->
+  <header class="bg-gray-900 border-b border-gray-800 px-6 py-3 flex items-center justify-between sticky top-0 z-20">
+    <div class="flex items-center gap-4">
+      <a href="/" class="flex items-center gap-2 text-gray-400 hover:text-white transition text-xs">
+        ← Bot Dashboard
+      </a>
+      <span class="text-gray-700">|</span>
+      <span class="font-bold text-white tracking-tight">Trader Discovery</span>
+    </div>
+    <div class="flex items-center gap-4">
+      <span class="text-xs text-gray-500">
+        Target: <span class="text-gray-300 font-mono" x-text="currentTarget ? currentTarget.slice(0,8) + '…' + currentTarget.slice(-6) : '—'"></span>
+      </span>
+      <button @click="logout"
+              class="px-3 py-1.5 rounded text-gray-400 hover:text-white text-xs font-medium border border-gray-700 hover:border-gray-500 transition">
+        ⎋ Logout
+      </button>
+    </div>
+  </header>
+
+  <!-- ── TOAST ─────────────────────────────────────────────────────────── -->
+  <div x-show="toast" x-transition
+       class="fixed bottom-6 right-6 z-50 px-5 py-3 rounded-xl border text-sm font-semibold shadow-xl"
+       :class="toast && toast.startsWith('✅') ? 'bg-green-900 border-green-700 text-green-300' : 'bg-red-900 border-red-700 text-red-300'"
+       x-text="toast">
+  </div>
+
+  <!-- ── MAIN ──────────────────────────────────────────────────────────── -->
+  <div class="px-6 py-6 max-w-7xl mx-auto space-y-6">
+
+    <!-- Controls row -->
+    <div class="flex items-center justify-between">
+      <div>
+        <h1 class="text-lg font-bold text-white">Off-Leaderboard Trader Discovery</h1>
+        <p class="text-xs text-gray-500 mt-0.5">
+          Scans the Polygon blockchain for skilled traders invisible on the Polymarket leaderboard,
+          then scores them by P&L, win rate, and recency.
+        </p>
+      </div>
+      <div class="flex items-center gap-3">
+        <div class="flex items-center gap-2 text-xs">
+          <label class="text-gray-500">Lookback days</label>
+          <input x-model.number="discoveryDays" type="number" min="1" max="90" step="1"
+                 class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm w-16 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30 transition">
+        </div>
+        <button @click="runDiscovery"
+                :disabled="discoveryStatus.status === 'running'"
+                class="px-5 py-2 rounded-lg text-white text-sm font-semibold transition disabled:opacity-40 disabled:cursor-not-allowed bg-indigo-600 hover:bg-indigo-700">
+          <span x-show="discoveryStatus.status !== 'running'">Run Discovery</span>
+          <span x-show="discoveryStatus.status === 'running'">Running…</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Status bar -->
+    <div x-show="discoveryStatus.status !== 'idle'" x-transition
+         class="px-4 py-3 rounded-xl border text-xs"
+         :class="{
+           'bg-indigo-500/10 border-indigo-500/30 text-indigo-300': discoveryStatus.status === 'running',
+           'bg-green-500/10 border-green-500/30 text-green-300': discoveryStatus.status === 'done',
+           'bg-red-500/10 border-red-500/30 text-red-300': discoveryStatus.status === 'error',
+         }">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <span x-show="discoveryStatus.status === 'running'" class="animate-pulse">●</span>
+          <span x-text="discoveryStatus.progress || discoveryStatus.error || discoveryStatus.status"></span>
+        </div>
+        <span x-show="discoveryStatus.addressesFound > 0" class="font-mono text-gray-400"
+              x-text="discoveryStatus.addressesEvaluated.toLocaleString() + ' / ' + discoveryStatus.addressesFound.toLocaleString() + ' addresses evaluated'"></span>
+      </div>
+      <!-- Progress bar -->
+      <div x-show="discoveryStatus.status === 'running' && discoveryStatus.addressesFound > 0"
+           class="mt-2 h-1 bg-indigo-900/60 rounded-full overflow-hidden">
+        <div class="h-full bg-indigo-500 rounded-full transition-all duration-500"
+             :style="'width:' + Math.round((discoveryStatus.addressesEvaluated / discoveryStatus.addressesFound) * 100) + '%'">
+        </div>
+      </div>
+    </div>
+
+    <!-- Stats row -->
+    <div x-show="traders.length > 0" class="grid grid-cols-4 gap-3">
+      <div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
+        <p class="text-xs text-gray-500 mb-1">Traders Found</p>
+        <p class="text-2xl font-bold text-white" x-text="traders.length"></p>
+      </div>
+      <div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
+        <p class="text-xs text-gray-500 mb-1">Profitable (P&L > 0)</p>
+        <p class="text-2xl font-bold text-green-400" x-text="traders.filter(t => t.realizedPnl > 0).length"></p>
+      </div>
+      <div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
+        <p class="text-xs text-gray-500 mb-1">High Win Rate (≥75% adj.)</p>
+        <p class="text-2xl font-bold text-blue-400" x-text="traders.filter(t => t.winRate >= 0.75).length"></p>
+      </div>
+      <div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
+        <p class="text-xs text-gray-500 mb-1">Current Target</p>
+        <p class="text-sm font-bold font-mono text-white truncate"
+           x-text="currentTarget ? currentTarget.slice(0,10) + '…' : '—'"></p>
+      </div>
+    </div>
+
+    <!-- Trader table -->
+    <div class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+      <div class="px-4 py-3 border-b border-gray-800 flex items-center justify-between">
+        <h2 class="font-semibold text-white">Ranked Traders</h2>
+        <div class="flex items-center gap-3">
+          <!-- Filter -->
+          <label class="flex items-center gap-2 text-xs text-gray-500 cursor-pointer">
+            <input type="checkbox" x-model="filterProfitable" class="rounded">
+            Profitable only
+          </label>
+          <label class="flex items-center gap-2 text-xs text-gray-500 cursor-pointer">
+            <input type="checkbox" x-model="filterHighWinRate" class="rounded">
+            Win rate ≥ 75% (adj.)
+          </label>
+          <span class="text-xs text-gray-600" x-text="filteredTraders.length + ' shown'"></span>
+        </div>
+      </div>
+
+      <div class="overflow-x-auto">
+        <table class="w-full">
+          <thead>
+            <tr class="text-xs text-gray-500 bg-gray-950/40">
+              <th class="px-4 py-2.5 text-left font-medium">Address</th>
+              <th class="px-4 py-2.5 text-right font-medium cursor-pointer hover:text-white" @click="sortBy('score')">
+                Score <span x-text="sort.key==='score' ? (sort.asc?'↑':'↓') : ''"></span>
+              </th>
+              <th class="px-4 py-2.5 text-right font-medium cursor-pointer hover:text-white" @click="sortBy('realizedPnl')">
+                P&L <span x-text="sort.key==='realizedPnl' ? (sort.asc?'↑':'↓') : ''"></span>
+              </th>
+              <th class="px-4 py-2.5 text-right font-medium cursor-pointer hover:text-white" @click="sortBy('winRate')">
+                Win Rate <span x-text="sort.key==='winRate' ? (sort.asc?'↑':'↓') : ''"></span>
+              </th>
+              <th class="px-4 py-2.5 text-right font-medium">Settled</th>
+              <th class="px-4 py-2.5 text-right font-medium">Open</th>
+              <th class="px-4 py-2.5 text-right font-medium cursor-pointer hover:text-white" @click="sortBy('totalVolume')">
+                Volume <span x-text="sort.key==='totalVolume' ? (sort.asc?'↑':'↓') : ''"></span>
+              </th>
+              <th class="px-4 py-2.5 text-right font-medium cursor-pointer hover:text-white" @click="sortBy('lastTradeAt')">
+                Last Active <span x-text="sort.key==='lastTradeAt' ? (sort.asc?'↑':'↓') : ''"></span>
+              </th>
+              <th class="px-4 py-2.5 text-center font-medium">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-if="filteredTraders.length === 0">
+              <tr>
+                <td colspan="9" class="px-4 py-12 text-center text-gray-600">
+                  <template x-if="traders.length === 0">
+                    <div>
+                      <p class="text-base mb-1">No traders discovered yet</p>
+                      <p class="text-xs">Click "Run Discovery" to scan the blockchain. A 30-day lookback takes ~15 minutes.</p>
+                    </div>
+                  </template>
+                  <template x-if="traders.length > 0">
+                    <p>No traders match the current filters.</p>
+                  </template>
+                </td>
+              </tr>
+            </template>
+            <template x-for="t in filteredTraders" :key="t.address">
+              <tr class="border-t border-gray-800/60 hover:bg-gray-800/20 transition-colors fade-in">
+                <td class="px-4 py-3">
+                  <div class="flex items-center gap-2">
+                    <span class="font-mono text-gray-300 text-xs"
+                          x-text="t.address.slice(0,10) + '…' + t.address.slice(-8)"></span>
+                    <span x-show="currentTarget && currentTarget.toLowerCase() === t.address.toLowerCase()"
+                          class="text-xs px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 border border-blue-500/30">
+                      current
+                    </span>
+                  </div>
+                </td>
+                <td class="px-4 py-3 text-right">
+                  <span class="text-sm font-bold px-2 py-0.5 rounded"
+                        :class="t.score >= 60 ? 'text-green-400 bg-green-500/10' : t.score >= 35 ? 'text-yellow-400 bg-yellow-500/10' : 'text-gray-500'"
+                        x-text="t.score"></span>
+                </td>
+                <td class="px-4 py-3 text-right font-mono text-xs font-semibold"
+                    :class="t.realizedPnl >= 0 ? 'text-green-400' : 'text-red-400'"
+                    x-text="(t.realizedPnl >= 0 ? '+$' : '-$') + Math.abs(t.realizedPnl).toFixed(2)">
+                </td>
+                <td class="px-4 py-3 text-right">
+                  <span class="font-mono text-xs px-2 py-0.5 rounded"
+                        :class="t.winRate >= 0.9 ? 'text-green-400 bg-green-500/10' : t.winRate >= 0.6 ? 'text-yellow-400 bg-yellow-500/10' : 'text-gray-400'"
+                        x-text="(t.settledMarkets ?? t.marketCount) > 0 ? (t.winRate * 100).toFixed(0) + '%' : '—'">
+                  </span>
+                </td>
+                <td class="px-4 py-3 text-right text-xs text-gray-400" x-text="(t.settledMarkets ?? t.marketCount ?? 0).toLocaleString()"></td>
+                <td class="px-4 py-3 text-right text-xs"
+                    :class="(t.openMarkets ?? 0) > 0 ? 'text-blue-400' : 'text-gray-600'"
+                    x-text="(t.openMarkets ?? 0) > 0 ? t.openMarkets : '—'">
+                </td>
+                <td class="px-4 py-3 text-right font-mono text-xs text-gray-400"
+                    x-text="'$' + (t.totalVolume ?? 0).toLocaleString(undefined, {maximumFractionDigits:0})">
+                </td>
+                <td class="px-4 py-3 text-right text-xs text-gray-500"
+                    x-text="t.lastTradeAt ? fmtDate(t.lastTradeAt) : '—'">
+                </td>
+                <td class="px-4 py-3 text-center">
+                  <button @click="selectTrader(t.address)"
+                          :disabled="currentTarget && currentTarget.toLowerCase() === t.address.toLowerCase()"
+                          class="text-xs px-3 py-1.5 rounded border font-medium transition disabled:opacity-30 disabled:cursor-not-allowed bg-blue-500/10 text-blue-400 border-blue-500/20 hover:bg-blue-500/20">
+                    Set Target
+                  </button>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+
+      <div x-show="filteredTraders.length > 0"
+           class="px-4 py-3 border-t border-gray-800 text-xs text-gray-600">
+        After setting a new target, go to the Bot Dashboard and restart the bot to apply the change.
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ── ALPINE APP ─────────────────────────────────────────────────────── -->
+  <script>
+    function app() {
+      return {
+        traders: [],
+        currentTarget: '',
+        discoveryStatus: { status: 'idle', progress: '', addressesFound: 0, addressesEvaluated: 0 },
+        discoveryDays: 30,
+        discoveryPollTimer: null,
+        filterProfitable: false,
+        filterHighWinRate: false,
+        sort: { key: 'score', asc: false },
+        toast: '',
+
+        get filteredTraders() {
+          let list = [...this.traders];
+          if (this.filterProfitable) list = list.filter(t => t.realizedPnl > 0);
+          if (this.filterHighWinRate) list = list.filter(t => t.winRate >= 0.9);
+          list.sort((a, b) => {
+            const av = a[this.sort.key] ?? 0;
+            const bv = b[this.sort.key] ?? 0;
+            return this.sort.asc ? av - bv : bv - av;
+          });
+          return list;
+        },
+
+        sortBy(key) {
+          if (this.sort.key === key) {
+            this.sort.asc = !this.sort.asc;
+          } else {
+            this.sort.key = key;
+            this.sort.asc = false;
+          }
+        },
+
+        async init() {
+          await this.fetchConfig();
+          await this.fetchTraders();
+          await this.fetchDiscoveryStatus();
+          // If discovery is already running, start polling
+          if (this.discoveryStatus.status === 'running') this.pollDiscovery();
+        },
+
+        async fetchConfig() {
+          try {
+            const r = await fetch('/api/config');
+            if (r.ok) {
+              const d = await r.json();
+              this.currentTarget = d.targetWallet || '';
+            }
+          } catch {}
+        },
+
+        async fetchTraders() {
+          try {
+            const r = await fetch('/api/traders');
+            if (r.ok) {
+              const d = await r.json();
+              this.traders = d.traders || [];
+            }
+          } catch {}
+        },
+
+        async fetchDiscoveryStatus() {
+          try {
+            const r = await fetch('/api/traders/discovery-status');
+            if (r.ok) this.discoveryStatus = await r.json();
+          } catch {}
+        },
+
+        async runDiscovery() {
+          if (this.discoveryStatus.status === 'running') return;
+          try {
+            const r = await fetch('/api/traders/discover', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ lookbackDays: this.discoveryDays }),
+            });
+            if (r.ok) {
+              const d = await r.json();
+              this.discoveryStatus = d.status;
+              this.pollDiscovery();
+            }
+          } catch {}
+        },
+
+        pollDiscovery() {
+          if (this.discoveryPollTimer) clearInterval(this.discoveryPollTimer);
+          this.discoveryPollTimer = setInterval(async () => {
+            try {
+              const r = await fetch('/api/traders/discovery-status');
+              if (r.ok) {
+                this.discoveryStatus = await r.json();
+                if (this.discoveryStatus.status === 'done' || this.discoveryStatus.status === 'error') {
+                  clearInterval(this.discoveryPollTimer);
+                  this.discoveryPollTimer = null;
+                  this.fetchTraders();
+                }
+              }
+            } catch {}
+          }, 5000);
+        },
+
+        async selectTrader(address) {
+          try {
+            const r = await fetch('/api/settings', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ targetWallet: address }),
+            });
+            if (r.ok) {
+              this.currentTarget = address;
+              this.showToast(`✅ Target set to ${address.slice(0, 10)}… — restart bot to apply.`);
+            } else {
+              this.showToast('❌ Failed to update target wallet');
+            }
+          } catch {
+            this.showToast('❌ Network error');
+          }
+        },
+
+        async logout() {
+          try { await fetch('/api/auth/logout', { method: 'POST' }); } catch {}
+          location.href = '/login';
+        },
+
+        showToast(msg, duration = 8000) {
+          this.toast = msg;
+          setTimeout(() => this.toast = '', duration);
+        },
+
+        fmtDate(ts) {
+          if (!ts) return '—';
+          const d = new Date(ts);
+          const today = new Date();
+          const isToday = d.toDateString() === today.toDateString();
+          if (isToday) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+        },
+      };
+    }
+  </script>
+</body>
+</html>

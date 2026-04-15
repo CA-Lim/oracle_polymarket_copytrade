@@ -17,13 +17,17 @@ export interface Trade {
 export class TradeMonitor {
   private lastProcessedTimestamp: number = 0;
   private processedTradeIds: Set<string> = new Set();
+  private walletAddress: string;
+
+  constructor(walletAddress?: string) {
+    this.walletAddress = (walletAddress || config.targetWallet).toLowerCase();
+  }
 
   async initialize(): Promise<void> {
     this.lastProcessedTimestamp = Date.now();
-    console.log(`📊 Monitor initialized at ${new Date(this.lastProcessedTimestamp).toISOString()}`);
-    console.log(`   Will copy trades that occur AFTER this time`);
+    console.log(`📊 Monitor initialised for ${this.walletAddress} at ${new Date(this.lastProcessedTimestamp).toISOString()}`);
   }
-  
+
   private async fetchTradesFromDataApi(): Promise<Trade[]> {
     try {
       const startSeconds = Math.floor(this.lastProcessedTimestamp / 1000) + 1;
@@ -31,7 +35,7 @@ export class TradeMonitor {
         'https://data-api.polymarket.com/activity',
         {
           params: {
-            user: config.targetWallet.toLowerCase(),
+            user: this.walletAddress,
             type: 'TRADE',
             limit: 100,
             sortBy: 'TIMESTAMP',

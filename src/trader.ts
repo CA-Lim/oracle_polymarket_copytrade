@@ -542,6 +542,53 @@ export class TradeExecutor {
   }
   
   
+  /** Place a FOK market-sell for all shares of a position. */
+  async exitPosition(tokenId: string, shares: number): Promise<CopyExecutionResult> {
+    console.log(`🔴 Exiting position: ${shares} shares of token ${tokenId}`);
+
+    const [orderbook, orderOpts, metadata] = await Promise.all([
+      this.clobClient.getOrderBook(tokenId),
+      this.getOrderOptions(tokenId),
+      this.getMarketMetadata(tokenId),
+    ]);
+
+    const bids = (orderbook.bids ?? []) as Array<{ price: string }>;
+    if (!bids.length) throw new Error('No bids available — cannot exit position right now');
+
+    const bestBid = parseFloat(bids[0].price);
+    const withSlippage = bestBid * (1 - config.trading.slippageTolerance);
+    const validatedPrice = await this.validatePrice(withSlippage, tokenId);
+    console.log(`   Best bid: ${bestBid.toFixed(4)}, exit price: ${validatedPrice.toFixed(4)}, shares: ${shares}`);
+
+    const response = await this.clobClient.createAndPostMarketOrder(
+      {
+        tokenID: tokenId,
+        amount: shares,
+        price: validatedPrice,
+        side: Side.SELL,
+        feeRateBps: metadata.feeRateBps,
+        orderType: OrderType.FOK,
+      },
+      orderOpts,
+      OrderType.FOK,
+    );
+
+    if (response.success) {
+      const received = shares * validatedPrice;
+      console.log(`✅ Exit order executed: ${response.orderID} (~$${received.toFixed(2)} USDC.e)`);
+      return {
+        orderId: response.orderID,
+        copyNotional: received,
+        copyShares: shares,
+        price: validatedPrice,
+        side: 'SELL',
+        tokenId,
+      };
+    }
+    const errMsg = response.errorMsg || response.error || 'Unknown error';
+    throw new Error(`Exit order failed: ${errMsg}`);
+  }
+
   async getPositions(): Promise<any[]> {
     try {
       return await this.clobClient.getPositions();
