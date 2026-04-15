@@ -27,6 +27,10 @@
     <div class="flex items-center gap-3">
       <span class="text-base">🤖</span>
       <span class="font-bold text-white tracking-tight">Oracle P1 - Bot 1</span>
+      <a href="/discovery"
+         class="text-xs px-2.5 py-1 rounded border border-gray-700 text-gray-400 hover:text-white hover:border-gray-500 transition">
+        Trader Discovery →
+      </a>
       <!-- status pill -->
       <span class="text-xs px-2 py-0.5 rounded-full border font-semibold"
             :class="{
@@ -76,6 +80,11 @@
        class="fixed bottom-6 right-6 z-50 px-5 py-3 rounded-xl border text-sm font-semibold shadow-xl"
        :class="redeemMsg.startsWith('✅') ? 'bg-green-900 border-green-700 text-green-300' : 'bg-red-900 border-red-700 text-red-300'"
        x-text="redeemMsg">
+  </div>
+  <div x-show="toast.msg" x-transition
+       class="fixed bottom-20 right-6 z-50 px-5 py-3 rounded-xl border text-sm font-semibold shadow-xl max-w-sm"
+       :class="toast.ok ? 'bg-green-900 border-green-700 text-green-300' : 'bg-red-900 border-red-700 text-red-300'"
+       x-text="toast.msg">
   </div>
 
   <!-- ── LOW BALANCE WARNING ───────────────────────────────────────────── -->
@@ -247,24 +256,29 @@
                     x-text="(pos.percentPnl >= 0 ? '+' : '') + Number(pos.percentPnl).toFixed(1) + '%'"></td>
                 <td class="px-4 py-2.5 text-right text-gray-300 font-mono" x-text="'$' + Number(pos.currentValue).toFixed(2)"></td>
                 <td class="px-4 py-2.5 text-center">
-                  <button x-show="pos.redeemable"
-                          @click="redeemPosition(pos)"
-                          :disabled="redeeming[pos.conditionId]"
-                          class="text-xs px-2 py-0.5 rounded border bg-green-500/10 text-green-400 border-green-500/20 hover:bg-green-500/20 transition disabled:opacity-50 disabled:cursor-not-allowed">
-                    <span x-text="redeeming[pos.conditionId] ? '⏳ Redeeming…' : '💰 Redeem'"></span>
-                  </button>
-                  <span x-show="!pos.redeemable && pos.curPrice >= 0.95"
-                        class="text-xs px-2 py-0.5 rounded border bg-yellow-500/10 text-yellow-400 border-yellow-500/20">
-                    Pending
-                  </span>
-                  <span x-show="!pos.redeemable && pos.curPrice <= 0.05"
-                        class="text-xs px-2 py-0.5 rounded border bg-red-500/10 text-red-500 border-red-500/20">
-                    Worthless
-                  </span>
-                  <span x-show="!pos.redeemable && pos.curPrice > 0.05 && pos.curPrice < 0.95"
-                        class="text-xs text-gray-600">
-                    Active
-                  </span>
+                  <div class="flex items-center justify-center gap-1.5 flex-wrap">
+                    <button x-show="pos.redeemable"
+                            @click="redeemPosition(pos)"
+                            :disabled="redeeming[pos.conditionId]"
+                            class="text-xs px-2 py-0.5 rounded border bg-green-500/10 text-green-400 border-green-500/20 hover:bg-green-500/20 transition disabled:opacity-50 disabled:cursor-not-allowed">
+                      <span x-text="redeeming[pos.conditionId] ? '⏳ Redeeming…' : '💰 Redeem'"></span>
+                    </button>
+                    <button type="button"
+                            x-show="!pos.redeemable && pos.curPrice > 0.05 && pos.curPrice < 0.95"
+                            @click.prevent="exitPosition(pos)"
+                            :disabled="!!exitingPos[pos.asset]"
+                            class="text-xs px-2.5 py-1 rounded border font-semibold cursor-pointer bg-red-600/30 text-red-200 border-red-500/60 hover:bg-red-500/50 hover:text-white hover:border-red-400 transition active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed">
+                      <span x-text="exitingPos[pos.asset] ? '⏳ Exiting…' : '🚪 Exit'"></span>
+                    </button>
+                    <span x-show="!pos.redeemable && pos.curPrice >= 0.95"
+                          class="text-xs px-2 py-0.5 rounded border bg-yellow-500/10 text-yellow-400 border-yellow-500/20">
+                      Pending
+                    </span>
+                    <span x-show="!pos.redeemable && pos.curPrice <= 0.05"
+                          class="text-xs px-2 py-0.5 rounded border bg-red-500/10 text-red-500 border-red-500/20">
+                      Worthless
+                    </span>
+                  </div>
                 </td>
               </tr>
             </template>
@@ -277,13 +291,21 @@
     <div class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
       <div class="px-4 py-3 border-b border-gray-800 flex items-center justify-between">
         <h2 class="font-semibold text-white">Trade History</h2>
-        <span class="text-xs text-gray-500" x-text="(data.recentTrades?.length ?? 0) + ' trades (last 100)'"></span>
+        <div class="flex items-center gap-3">
+          <span class="text-xs text-gray-500" x-text="(data.recentTrades?.length ?? 0) + ' trades (last 100)'"></span>
+          <button type="button" @click="refreshTrades()"
+                  :disabled="refreshingTrades"
+                  class="text-xs px-2.5 py-1 rounded border cursor-pointer bg-gray-700/50 text-gray-300 border-gray-600 hover:bg-gray-600/60 hover:text-white transition disabled:opacity-40 disabled:cursor-not-allowed">
+            <span x-text="refreshingTrades ? '⏳ Refreshing…' : '🔄 Refresh'"></span>
+          </button>
+        </div>
       </div>
       <div class="overflow-x-auto">
         <table class="w-full">
           <thead>
             <tr class="text-xs text-gray-500 bg-gray-950/40">
               <th class="px-4 py-2.5 text-left font-medium">Time</th>
+              <th class="px-4 py-2.5 text-left font-medium">Source</th>
               <th class="px-4 py-2.5 text-left font-medium">Market</th>
               <th class="px-4 py-2.5 text-left font-medium">Side</th>
               <th class="px-4 py-2.5 text-right font-medium">Original</th>
@@ -303,6 +325,12 @@
             <template x-for="t in (data.recentTrades ?? [])" :key="t.id">
               <tr class="border-t border-gray-800/60 hover:bg-gray-800/20 transition-colors fade-in">
                 <td class="px-4 py-2.5 text-gray-500 font-mono whitespace-nowrap" x-text="fmtDate(t.timestamp)"></td>
+                <td class="px-4 py-2.5 font-mono">
+                  <template x-if="t.sourceAddress">
+                    <span class="text-xs text-indigo-400" :title="t.sourceAddress" x-text="t.sourceAddress.slice(0,6)+'…'+t.sourceAddress.slice(-4)"></span>
+                  </template>
+                  <template x-if="!t.sourceAddress"><span class="text-gray-600">—</span></template>
+                </td>
                 <td class="px-4 py-2.5 text-gray-300 max-w-xs">
                   <span class="block truncate" :title="t.market" x-text="t.market || (t.tokenId?.slice(0, 12) + '…')"></span>
                   <span x-show="t.outcome" class="text-xs text-gray-500" x-text="t.outcome"></span>
@@ -332,6 +360,183 @@
             </template>
           </tbody>
         </table>
+      </div>
+    </div>
+
+    <!-- ── COPY TARGETS ─────────────────────────────────────────────────── -->
+    <div class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+      <div class="px-4 py-3 border-b border-gray-800 flex items-center justify-between">
+        <h2 class="font-semibold text-white">Copy Targets</h2>
+        <div class="flex items-center gap-3">
+          <span class="text-xs text-gray-500" x-text="(data.copyTargets?.filter(t=>t.enabled).length ?? 0) + ' active'"></span>
+          <button @click="addTargetModal.show = true"
+                  class="text-xs px-2.5 py-1 rounded border border-indigo-500/40 text-indigo-400 hover:bg-indigo-500/10 transition">
+            + Add Address
+          </button>
+        </div>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full">
+          <thead>
+            <tr class="text-xs text-gray-500 bg-gray-950/40">
+              <th class="px-4 py-2.5 text-left font-medium">Address</th>
+              <th class="px-4 py-2.5 text-left font-medium">Label</th>
+              <th class="px-4 py-2.5 text-left font-medium">Categories</th>
+              <th class="px-4 py-2.5 text-left font-medium">Settings</th>
+              <th class="px-4 py-2.5 text-left font-medium">Added By</th>
+              <th class="px-4 py-2.5 text-center font-medium">Active</th>
+              <th class="px-4 py-2.5 text-center font-medium">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-if="!data.copyTargets || data.copyTargets.length === 0">
+              <tr><td colspan="7" class="px-4 py-10 text-center text-gray-600">No copy targets — add one or run AI Review</td></tr>
+            </template>
+            <template x-for="t in (data.copyTargets ?? [])" :key="t.address">
+              <tr class="border-t border-gray-800/60 hover:bg-gray-800/20 transition-colors">
+                <td class="px-4 py-3 font-mono">
+                  <span class="text-indigo-400 text-xs" :title="t.address" x-text="t.address.slice(0,8)+'…'+t.address.slice(-6)"></span>
+                </td>
+                <td class="px-4 py-3">
+                  <span class="text-gray-200 text-sm" x-text="t.label || '—'"></span>
+                  <p x-show="t.aiReason" class="text-xs text-gray-500 max-w-xs truncate mt-0.5" :title="t.aiReason" x-text="t.aiReason"></p>
+                </td>
+                <td class="px-4 py-3">
+                  <div class="flex flex-wrap gap-1">
+                    <template x-for="cat in (t.topCategories ?? [])" :key="cat">
+                      <span class="text-xs px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20" x-text="cat"></span>
+                    </template>
+                    <span x-show="!t.topCategories?.length" class="text-gray-600 text-xs">—</span>
+                  </div>
+                </td>
+                <td class="px-4 py-3 text-xs text-gray-400 font-mono space-y-0.5">
+                  <div>×<span x-text="(t.settings?.multiplier ?? 0.1)"></span> mult</div>
+                  <div>$<span x-text="(t.settings?.minTradeSize ?? 1)"></span>–$<span x-text="(t.settings?.maxTradeSize ?? 5)"></span></div>
+                  <div x-show="t.settings?.allowKeywords?.length" class="text-green-600 truncate max-w-[140px]" :title="'Allow: '+t.settings?.allowKeywords?.join(', ')">
+                    ✅ <span x-text="t.settings?.allowKeywords?.slice(0,2).join(', ')"></span><span x-show="t.settings?.allowKeywords?.length > 2">…</span>
+                  </div>
+                  <div x-show="t.settings?.blockKeywords?.length" class="text-red-600 truncate max-w-[140px]" :title="'Block: '+t.settings?.blockKeywords?.join(', ')">
+                    🚫 <span x-text="t.settings?.blockKeywords?.slice(0,2).join(', ')"></span><span x-show="t.settings?.blockKeywords?.length > 2">…</span>
+                  </div>
+                </td>
+                <td class="px-4 py-3">
+                  <span class="text-xs px-1.5 py-0.5 rounded"
+                        :class="t.addedBy === 'ai' ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20' : 'bg-gray-700 text-gray-400'"
+                        x-text="t.addedBy === 'ai' ? '🤖 AI' : '👤 Manual'"></span>
+                </td>
+                <td class="px-4 py-3 text-center">
+                  <button @click="toggleTarget(t.address, !t.enabled)"
+                          class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors"
+                          :class="t.enabled ? 'bg-green-600' : 'bg-gray-600'">
+                    <span class="inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform"
+                          :class="t.enabled ? 'translate-x-4' : 'translate-x-1'"></span>
+                  </button>
+                </td>
+                <td class="px-4 py-3 text-center">
+                  <button @click="removeTarget(t.address)"
+                          class="text-xs px-2 py-0.5 rounded border border-red-500/30 text-red-400 hover:bg-red-500/10 transition">
+                    Remove
+                  </button>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ── AI REVIEW ──────────────────────────────────────────────────────── -->
+    <div class="bg-gray-900 border border-gray-800 rounded-xl p-5">
+      <div class="flex items-center justify-between mb-4">
+        <div class="flex items-center gap-3">
+          <h2 class="font-semibold text-white">AI Review</h2>
+          <span class="text-xs px-2 py-0.5 rounded-full border font-semibold"
+                :class="{
+                  'bg-green-500/20 text-green-400 border-green-500/30': data.aiReviewState?.status === 'done',
+                  'bg-yellow-500/20 text-yellow-400 border-yellow-500/30': data.aiReviewState?.status === 'running',
+                  'bg-red-500/20 text-red-400 border-red-500/30': data.aiReviewState?.status === 'error',
+                  'bg-gray-500/20 text-gray-500 border-gray-600/30': !data.aiReviewState?.status || data.aiReviewState?.status === 'idle'
+                }"
+                x-text="({idle:'○ Idle', running:'◌ Running…', done:'✓ Done', error:'✕ Error'})[data.aiReviewState?.status] || '○ Idle'">
+          </span>
+        </div>
+        <button @click="runAiReview()"
+                :disabled="data.aiReviewState?.status === 'running' || aiReviewing"
+                class="text-xs px-3 py-1.5 rounded border border-purple-500/40 text-purple-400 hover:bg-purple-500/10 transition disabled:opacity-40 disabled:cursor-not-allowed">
+          <span x-text="data.aiReviewState?.status === 'running' ? '⏳ Running…' : '🤖 Run AI Review Now'"></span>
+        </button>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+        <div class="bg-gray-800/50 rounded-lg p-3">
+          <p class="text-xs text-gray-500 mb-1">Last Run</p>
+          <p class="text-gray-300" x-text="data.aiReviewState?.finishedAt ? fmtDate(data.aiReviewState.finishedAt) : '—'"></p>
+        </div>
+        <div class="bg-gray-800/50 rounded-lg p-3">
+          <p class="text-xs text-gray-500 mb-1">Next Scheduled</p>
+          <p class="text-gray-300" x-text="data.aiReviewState?.nextRunAt ? fmtDate(data.aiReviewState.nextRunAt) : '—'"></p>
+        </div>
+        <div class="bg-gray-800/50 rounded-lg p-3">
+          <p class="text-xs text-gray-500 mb-1">Last Changes</p>
+          <p class="text-gray-300">
+            <span x-text="(data.aiReviewState?.lastChanges?.addedAddresses?.length ?? 0) + ' added'"></span>
+            <span class="text-gray-600 mx-1">·</span>
+            <span x-text="(data.aiReviewState?.lastChanges?.removedAddresses?.length ?? 0) + ' removed'"></span>
+            <span class="text-gray-600 mx-1">·</span>
+            <span x-text="(data.aiReviewState?.lastChanges?.analyzedCount ?? 0) + ' analyzed'"></span>
+          </p>
+        </div>
+      </div>
+
+      <!-- removed/added detail -->
+      <template x-if="data.aiReviewState?.lastChanges?.removedAddresses?.length">
+        <div class="mt-3 pt-3 border-t border-gray-800">
+          <p class="text-xs text-gray-500 mb-2">Removed last run:</p>
+          <template x-for="r in (data.aiReviewState.lastChanges.removedAddresses ?? [])" :key="r.address">
+            <div class="flex items-start gap-2 text-xs mb-1">
+              <span class="text-red-400 font-mono" x-text="r.address.slice(0,10)+'…'"></span>
+              <span class="text-gray-500" x-text="r.reason"></span>
+            </div>
+          </template>
+        </div>
+      </template>
+      <template x-if="data.aiReviewState?.lastChanges?.addedAddresses?.length">
+        <div class="mt-3 pt-3 border-t border-gray-800">
+          <p class="text-xs text-gray-500 mb-2">Added last run:</p>
+          <template x-for="a in (data.aiReviewState.lastChanges.addedAddresses ?? [])" :key="a.address">
+            <div class="flex items-start gap-2 text-xs mb-1">
+              <span class="text-green-400 font-mono" x-text="a.address.slice(0,10)+'…'"></span>
+              <span class="text-gray-400" x-text="a.label"></span>
+            </div>
+          </template>
+        </div>
+      </template>
+
+      <p x-show="data.aiReviewState?.error" class="mt-3 text-xs text-red-400" x-text="data.aiReviewState?.error"></p>
+    </div>
+
+    <!-- ── ADD TARGET MODAL ───────────────────────────────────────────────── -->
+    <div x-show="addTargetModal.show" x-transition
+         class="fixed inset-0 z-40 flex items-center justify-center bg-black/60"
+         @click.self="addTargetModal.show = false">
+      <div class="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-full max-w-md shadow-2xl">
+        <h3 class="font-semibold text-white mb-4">Add Copy Target</h3>
+        <label class="block text-xs text-gray-500 mb-1.5">Wallet Address (0x…)</label>
+        <input x-model="addTargetModal.address" type="text" placeholder="0x..."
+               class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono placeholder-gray-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 transition mb-1">
+        <p class="text-xs text-gray-600 mb-4">Settings will be applied with defaults. Run AI Review to auto-configure.</p>
+        <div class="flex gap-3 justify-end">
+          <button @click="addTargetModal.show = false"
+                  class="px-4 py-2 rounded-lg text-gray-400 hover:text-white text-sm border border-gray-700 hover:border-gray-500 transition">
+            Cancel
+          </button>
+          <button @click="addTarget()"
+                  :disabled="addTargetModal.saving"
+                  class="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold transition disabled:opacity-40">
+            <span x-text="addTargetModal.saving ? 'Adding…' : 'Add Target'"></span>
+          </button>
+        </div>
+        <p x-show="addTargetModal.error" class="text-xs text-red-400 mt-2" x-text="addTargetModal.error"></p>
       </div>
     </div>
 
@@ -376,6 +581,34 @@
         <span x-show="saveError" class="text-red-400 text-xs" x-text="saveError"></span>
       </div>
 
+      <!-- Market keyword filters -->
+      <div class="mt-4 pt-4 border-t border-gray-800 space-y-3">
+        <p class="text-xs font-medium text-gray-400">Market Keyword Filters <span class="text-gray-600 font-normal">(case-insensitive, comma-separated)</span></p>
+        <div class="flex flex-wrap gap-4">
+          <div class="flex-1 min-w-[240px]">
+            <label class="block text-xs text-gray-500 mb-1.5">
+              🚫 Block Keywords
+              <span class="text-gray-600 ml-1">— skip trades whose market contains any of these</span>
+            </label>
+            <input x-model="settings.blockKeywords" type="text"
+                   placeholder='e.g. "bitcoin, up or down, crypto"'
+                   class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-red-500 focus:ring-1 focus:ring-red-500/30 transition">
+          </div>
+          <div class="flex-1 min-w-[240px]">
+            <label class="block text-xs text-gray-500 mb-1.5">
+              ✅ Allow Keywords
+              <span class="text-gray-600 ml-1">— if set, ONLY copy markets containing one of these</span>
+            </label>
+            <input x-model="settings.allowKeywords" type="text"
+                   placeholder='e.g. "hungary, crude oil, premier league"'
+                   class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500/30 transition">
+          </div>
+        </div>
+        <p class="text-xs text-gray-600">
+          Both filters apply together. Example: allow "hungary" + block "game" would copy Hungary markets but not game-specific sub-markets.
+        </p>
+      </div>
+
       <!-- read-only info row -->
       <div class="mt-4 pt-4 border-t border-gray-800 flex flex-wrap gap-4 text-xs text-gray-500">
         <span>Target: <span class="text-gray-400 font-mono" x-text="data.config?.targetWallet ? (data.config.targetWallet.slice(0,8) + '…' + data.config.targetWallet.slice(-6)) : '—'"></span></span>
@@ -406,15 +639,23 @@
             tradingPnl: 0, tradeCount: 0, redeemCount: 0,
           },
           config: {},
+          copyTargets: [],
+          aiReviewState: null,
         },
-        settings: { minTradeSize: 1, maxTradeSize: 5, positionMultiplier: 0.1, maxPerMarketNotional: 0, maxSessionNotional: 0 },
+        settings: { minTradeSize: 1, maxTradeSize: 5, positionMultiplier: 0.1, maxPerMarketNotional: 0, maxSessionNotional: 0, blockKeywords: '', allowKeywords: '' },
         saved: false,
         saveError: '',
         wsConnected: false,
         lastUpdate: '—',
         ws: null,
-        redeeming: {},   // conditionId → true while tx in flight
+        redeeming: {},
         redeemMsg: '',
+        exitingPos: {},
+        refreshingTrades: false,
+        aiReviewing: false,
+        addTargetModal: { show: false, address: '', saving: false, error: '' },
+        toast: { msg: '', ok: true },
+        _toastTimer: null,
 
         // ── Computed ──────────────────────────────────────────────────────
         get shortWallet() {
@@ -455,6 +696,8 @@
                 this.settings.positionMultiplier = msg.config.positionMultiplier;
                 this.settings.maxPerMarketNotional = msg.config.maxPerMarketNotional ?? 0;
                 this.settings.maxSessionNotional   = msg.config.maxSessionNotional   ?? 0;
+                this.settings.blockKeywords = (msg.config.blockKeywords ?? []).join(', ');
+                this.settings.allowKeywords = (msg.config.allowKeywords ?? []).join(', ');
               }
               this.lastUpdate = new Date().toLocaleTimeString();
             } else if (msg.type === 'status') {
@@ -500,6 +743,8 @@
                 positionMultiplier: String(this.settings.positionMultiplier),
                 maxPerMarketNotional: String(this.settings.maxPerMarketNotional),
                 maxSessionNotional:   String(this.settings.maxSessionNotional),
+                blockKeywords: this.settings.blockKeywords,
+                allowKeywords: this.settings.allowKeywords,
               }),
             });
             if (r.ok) {
@@ -538,6 +783,130 @@
           }
         },
 
+        // ── Toast ─────────────────────────────────────────────────────────
+        showToast(msg, ok = true) {
+          this.toast = { msg, ok };
+          clearTimeout(this._toastTimer);
+          this._toastTimer = setTimeout(() => this.toast.msg = '', 7000);
+        },
+
+        // ── Exit position ─────────────────────────────────────────────────
+        async exitPosition(pos) {
+          if (this.exitingPos[pos.asset]) return;
+          if (!confirm(`Exit position: ${Number(pos.size).toFixed(2)} shares of "${pos.title}"?\n\nThis places a FOK sell order at market price.`)) return;
+          this.exitingPos[pos.asset] = true;
+          try {
+            const r = await fetch(`/api/positions/${encodeURIComponent(pos.asset)}/exit`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ shares: Number(pos.size) }),
+            });
+            const d = await r.json();
+            if (r.ok) {
+              this.showToast(`✅ Exited position: ~$${Number(d.copyNotional ?? 0).toFixed(2)} USDC.e received`, true);
+            } else {
+              this.showToast(`❌ Exit failed: ${d.error}`, false);
+            }
+          } catch {
+            this.showToast('❌ Network error', false);
+          } finally {
+            this.exitingPos[pos.asset] = false;
+          }
+        },
+
+        // ── Refresh trade history from Polymarket ─────────────────────────
+        async refreshTrades() {
+          if (this.refreshingTrades) return;
+          this.refreshingTrades = true;
+          try {
+            const r = await fetch('/api/trades/refresh', { method: 'POST' });
+            const d = await r.json();
+            if (r.ok) {
+              this.showToast(`✅ Synced ${d.added} new trade${d.added === 1 ? '' : 's'} from Polymarket (total: ${d.total})`, true);
+            } else {
+              this.showToast(`❌ Refresh failed: ${d.error}`, false);
+            }
+          } catch {
+            this.showToast('❌ Network error', false);
+          } finally {
+            this.refreshingTrades = false;
+          }
+        },
+
+        // ── Copy target management ────────────────────────────────────────
+        async addTarget() {
+          this.addTargetModal.error = '';
+          const addr = this.addTargetModal.address.trim().toLowerCase();
+          if (!/^0x[0-9a-f]{40}$/.test(addr)) {
+            this.addTargetModal.error = 'Invalid address format (must be 0x + 40 hex chars)';
+            return;
+          }
+          this.addTargetModal.saving = true;
+          try {
+            const r = await fetch('/api/copy-targets', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ address: addr }),
+            });
+            const d = await r.json();
+            if (r.ok) {
+              this.addTargetModal.show = false;
+              this.addTargetModal.address = '';
+              this.showToast('✅ Target added', true);
+            } else {
+              this.addTargetModal.error = d.error || 'Failed';
+            }
+          } catch {
+            this.addTargetModal.error = 'Network error';
+          } finally {
+            this.addTargetModal.saving = false;
+          }
+        },
+
+        async removeTarget(address) {
+          if (!confirm(`Remove copy target ${address.slice(0,10)}…?\n\nThis stops monitoring this wallet.`)) return;
+          try {
+            const r = await fetch(`/api/copy-targets/${encodeURIComponent(address)}`, { method: 'DELETE' });
+            if (r.ok) {
+              this.showToast('✅ Target removed', true);
+            } else {
+              const d = await r.json();
+              this.showToast(`❌ ${d.error}`, false);
+            }
+          } catch {
+            this.showToast('❌ Network error', false);
+          }
+        },
+
+        async toggleTarget(address, enabled) {
+          try {
+            await fetch(`/api/copy-targets/${encodeURIComponent(address)}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ enabled }),
+            });
+          } catch {}
+        },
+
+        // ── AI Review ─────────────────────────────────────────────────────
+        async runAiReview() {
+          if (this.aiReviewing || this.data.aiReviewState?.status === 'running') return;
+          this.aiReviewing = true;
+          try {
+            const r = await fetch('/api/ai/review', { method: 'POST' });
+            if (r.ok) {
+              this.showToast('🤖 AI review started — check status above', true);
+            } else {
+              const d = await r.json();
+              this.showToast(`❌ ${d.error}`, false);
+            }
+          } catch {
+            this.showToast('❌ Network error', false);
+          } finally {
+            this.aiReviewing = false;
+          }
+        },
+
         // ── Helpers ───────────────────────────────────────────────────────
         fmtTime(ts) {
           if (!ts) return '—';
@@ -546,11 +915,8 @@
         fmtDate(ts) {
           if (!ts) return '—';
           const d = new Date(ts);
-          const today = new Date();
-          const isToday = d.toDateString() === today.toDateString();
-          if (isToday) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
           return d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' +
-                 d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                 d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
         },
       };
     }

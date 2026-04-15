@@ -7,10 +7,15 @@ import { fileURLToPath } from 'url';
 import { randomUUID } from 'crypto';
 import { PolymarketCopyBot } from './index.js';
 import { config } from './config.js';
+import { TraderDiscovery } from './trader-discovery.js';
+import { copyTargetManager } from './copy-target-manager.js';
+import { ReviewScheduler } from './scheduler.js';
+import { TradeExecutor } from './trader.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DASHBOARD_PATH = path.join(__dirname, '..', 'dashboard', 'index.html');
-const LOGIN_PATH     = path.join(__dirname, '..', 'dashboard', 'login.html');
+const DASHBOARD_PATH   = path.join(__dirname, '..', 'dashboard', 'index.html');
+const LOGIN_PATH       = path.join(__dirname, '..', 'dashboard', 'login.html');
+const DISCOVERY_PATH   = path.join(__dirname, '..', 'dashboard', 'discovery.html');
 const ENV_PATH = path.join(__dirname, '..', '.env');
 const PORT = parseInt(process.env.DASHBOARD_PORT || '3001');
 
@@ -56,8 +61,9 @@ interface TradeRecord {
   shares: number;
   status: 'filled' | 'failed';
   failReason?: string;
-  entryCost?: number;    // USDC actually spent (= copySize for filled BUYs)
-  conditionId?: string;  // links trade to redemption event
+  entryCost?: number;       // USDC actually spent (= copySize for filled BUYs)
+  conditionId?: string;     // links trade to redemption event
+  sourceAddress?: string;   // which copy target originated this trade
 }
 
 // ─── Account summary (from Polymarket activity API) ──────────────────────────
@@ -240,6 +246,17 @@ function addToHistory(record: TradeRecord) {
 // ─── Bot state ───────────────────────────────────────────────────────────────
 
 let bot: PolymarketCopyBot | null = null;
+
+// Lazy executor for position exits — works even when the bot is stopped.
+let _exitExecutor: TradeExecutor | null = null;
+async function getExitExecutor(): Promise<TradeExecutor> {
+  if (bot) return (bot as any).executor as TradeExecutor; // reuse bot's executor if available
+  if (!_exitExecutor) {
+    _exitExecutor = new TradeExecutor();
+    await _exitExecutor.initialize();
+  }
+  return _exitExecutor;
+}
 let botStatus: 'stopped' | 'running' | 'initializing' | 'error' = 'stopped';
 let botError: string | null = null;
 let manuallyStopped = false;                    // prevent auto-start after manual stop
@@ -269,6 +286,7 @@ async function startBot() {
       status: 'filled',
       entryCost: result.copyNotional,
       conditionId: result.conditionId ?? trade.conditionId ?? '',
+      sourceAddress: trade.sourceAddress || '',
     });
     broadcastSnapshot();
   };
@@ -287,6 +305,7 @@ async function startBot() {
       shares: 0,
       status: 'failed',
       failReason: reason,
+      sourceAddress: trade.sourceAddress || '',
     });
     broadcastSnapshot();
   };
@@ -419,6 +438,8 @@ async function broadcastSnapshot() {
     sessionStats: stats,
     recentTrades: tradeHistory.slice(0, 100),
     accountSummary,
+    copyTargets: copyTargetManager.getAll(),
+    aiReviewState: reviewScheduler.getState(),
     config: {
       targetWallet: config.targetWallet,
       minTradeSize: config.trading.minTradeSize,
@@ -537,6 +558,16 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // Serve discovery page
+  if (req.method === 'GET' && pathname === '/discovery') {
+    const html = await fs.readFile(DISCOVERY_PATH, 'utf-8').catch(
+      () => '<h1 style="font-family:sans-serif;padding:2rem">Discovery page not found</h1>'
+    );
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(html);
+    return;
+  }
+
   // API routes
   if (!pathname.startsWith('/api/')) { res.writeHead(404); res.end('Not found'); return; }
 
@@ -562,6 +593,49 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { trades: tradeHistory.slice(offset, offset + limit), total: tradeHistory.length });
     }
 
+    // POST /api/trades/refresh — pull recent activity from Polymarket and merge into local history
+    if (req.method === 'POST' && pathname === '/api/trades/refresh') {
+      if (!walletAddress) return json(res, 400, { error: 'Wallet not initialised' });
+      try {
+        const resp = await fetch(
+          `https://data-api.polymarket.com/activity?user=${walletAddress.toLowerCase()}&type=TRADE&limit=500&sortBy=TIMESTAMP&sortDirection=DESC`
+        );
+        const raw: any[] = await resp.json();
+        if (!Array.isArray(raw)) return json(res, 502, { error: 'Unexpected response from Polymarket' });
+
+        const existingTxHashes = new Set(tradeHistory.map((t) => t.id));
+        let added = 0;
+        for (const t of raw) {
+          const txHash: string = t.transactionHash || '';
+          if (!txHash || existingTxHashes.has(txHash)) continue;
+          addToHistory({
+            id: txHash,
+            timestamp: (t.timestamp ?? 0) * 1000,   // API returns seconds
+            market: t.title || '',
+            tokenId: t.asset || '',
+            outcome: t.outcome || '',
+            side: (t.side as 'BUY' | 'SELL') || 'BUY',
+            originalSize: t.usdcSize ?? 0,
+            copySize: t.usdcSize ?? 0,
+            price: t.price ?? 0,
+            shares: t.size ?? 0,
+            status: 'filled',
+            conditionId: t.conditionId || '',
+            entryCost: t.usdcSize ?? 0,
+          });
+          existingTxHashes.add(txHash);
+          added++;
+        }
+        // Re-sort by timestamp descending after merge
+        tradeHistory.sort((a, b) => b.timestamp - a.timestamp);
+        await saveTradeHistory();
+        broadcastSnapshot();
+        return json(res, 200, { ok: true, added, total: tradeHistory.length });
+      } catch (e: any) {
+        return json(res, 500, { error: e.message });
+      }
+    }
+
     // GET /api/account-summary
     if (req.method === 'GET' && pathname === '/api/account-summary') {
       return json(res, 200, accountSummary);
@@ -578,6 +652,8 @@ const server = http.createServer(async (req, res) => {
         slippageTolerance: config.trading.slippageTolerance,
         maxPerMarketNotional: config.risk.maxPerMarketNotional,
         maxSessionNotional: config.risk.maxSessionNotional,
+        blockKeywords: config.filters.blockKeywords,
+        allowKeywords: config.filters.allowKeywords,
       });
     }
 
@@ -619,6 +695,28 @@ const server = http.createServer(async (req, res) => {
         config.risk.maxSessionNotional = parseFloat(body.maxSessionNotional);
         envUpdates['MAX_SESSION_NOTIONAL'] = String(body.maxSessionNotional);
       }
+      if (body.targetWallet !== undefined) {
+        const addr = String(body.targetWallet).toLowerCase().trim();
+        if (/^0x[0-9a-f]{40}$/.test(addr)) {
+          config.targetWallet = addr;
+          envUpdates['TARGET_WALLET'] = addr;
+        }
+      }
+      if (body.blockKeywords !== undefined) {
+        // Accept a comma-separated string or an array
+        const kwList: string[] = Array.isArray(body.blockKeywords)
+          ? body.blockKeywords.map(String)
+          : String(body.blockKeywords).split(',').map((s: string) => s.trim());
+        config.filters.blockKeywords = kwList.filter(Boolean);
+        envUpdates['MARKET_BLOCK_KEYWORDS'] = config.filters.blockKeywords.join(',');
+      }
+      if (body.allowKeywords !== undefined) {
+        const kwList: string[] = Array.isArray(body.allowKeywords)
+          ? body.allowKeywords.map(String)
+          : String(body.allowKeywords).split(',').map((s: string) => s.trim());
+        config.filters.allowKeywords = kwList.filter(Boolean);
+        envUpdates['MARKET_ALLOW_KEYWORDS'] = config.filters.allowKeywords.join(',');
+      }
 
       await updateEnv(envUpdates);
       return json(res, 200, {
@@ -627,8 +725,127 @@ const server = http.createServer(async (req, res) => {
           minTradeSize: config.trading.minTradeSize,
           maxTradeSize: config.trading.maxTradeSize,
           positionMultiplier: config.trading.positionSizeMultiplier,
+          blockKeywords: config.filters.blockKeywords,
+          allowKeywords: config.filters.allowKeywords,
         },
       });
+    }
+
+    // GET /api/traders
+    if (req.method === 'GET' && pathname === '/api/traders') {
+      return json(res, 200, { traders: traderDiscovery.getTraders() });
+    }
+
+    // POST /api/traders/discover  (body: { lookbackDays?: number })
+    if (req.method === 'POST' && pathname === '/api/traders/discover') {
+      const body = await readBody(req);
+      if (traderDiscovery.getStatus().status === 'running') {
+        return json(res, 409, { error: 'Discovery already running' });
+      }
+      const lookbackDays = Math.max(1, Math.min(90, parseInt(body.lookbackDays ?? '30') || 30));
+      traderDiscovery.triggerDiscovery({ lookbackDays });
+      return json(res, 202, { ok: true, status: traderDiscovery.getStatus() });
+    }
+
+    // GET /api/traders/discovery-status
+    if (req.method === 'GET' && pathname === '/api/traders/discovery-status') {
+      return json(res, 200, traderDiscovery.getStatus());
+    }
+
+    // ── AI Review ─────────────────────────────────────────────────────────────
+
+    // GET /api/ai/status
+    if (req.method === 'GET' && pathname === '/api/ai/status') {
+      return json(res, 200, reviewScheduler.getState());
+    }
+
+    // POST /api/ai/review  — trigger manual review
+    if (req.method === 'POST' && pathname === '/api/ai/review') {
+      if (reviewScheduler.getState().status === 'running') {
+        return json(res, 409, { error: 'Review already running' });
+      }
+      // Fire without awaiting so the HTTP response returns immediately
+      reviewScheduler.run().catch(console.error);
+      return json(res, 202, { ok: true, status: reviewScheduler.getState() });
+    }
+
+    // ── Copy Targets ──────────────────────────────────────────────────────────
+
+    // GET /api/copy-targets
+    if (req.method === 'GET' && pathname === '/api/copy-targets') {
+      return json(res, 200, { targets: copyTargetManager.getAll() });
+    }
+
+    // POST /api/copy-targets  (body: { address, label?, settings? })
+    if (req.method === 'POST' && pathname === '/api/copy-targets') {
+      const body = await readBody(req);
+      const addr = String(body.address || '').toLowerCase().trim();
+      if (!/^0x[0-9a-f]{40}$/.test(addr)) {
+        return json(res, 400, { error: 'Invalid address' });
+      }
+      try {
+        copyTargetManager.add({
+          address: addr,
+          enabled: true,
+          label: body.label || addr.slice(0, 10) + '...',
+          topCategories: [],
+          aiReason: 'Added manually',
+          addedBy: 'manual',
+          settings: {
+            allowKeywords: body.settings?.allowKeywords ?? [...config.filters.allowKeywords],
+            blockKeywords: body.settings?.blockKeywords ?? [...config.filters.blockKeywords],
+            multiplier: body.settings?.multiplier ?? config.trading.positionSizeMultiplier,
+            maxTradeSize: body.settings?.maxTradeSize ?? config.trading.maxTradeSize,
+            minTradeSize: body.settings?.minTradeSize ?? config.trading.minTradeSize,
+            maxPerMarketNotional: body.settings?.maxPerMarketNotional ?? config.risk.maxPerMarketNotional,
+          },
+        });
+        if (bot) await bot.reloadTargets();
+        broadcastSnapshot();
+        return json(res, 201, { ok: true, targets: copyTargetManager.getAll() });
+      } catch (e: any) {
+        return json(res, 409, { error: e.message });
+      }
+    }
+
+    // DELETE /api/copy-targets/:address
+    const deleteTargetMatch = pathname.match(/^\/api\/copy-targets\/(.+)$/);
+    if (req.method === 'DELETE' && deleteTargetMatch) {
+      const addr = decodeURIComponent(deleteTargetMatch[1]).toLowerCase();
+      const removed = copyTargetManager.remove(addr);
+      if (!removed) return json(res, 404, { error: 'Address not found' });
+      if (bot) await bot.reloadTargets();
+      broadcastSnapshot();
+      return json(res, 200, { ok: true, targets: copyTargetManager.getAll() });
+    }
+
+    // PUT /api/copy-targets/:address  (body: partial CopyTarget fields)
+    const updateTargetMatch = pathname.match(/^\/api\/copy-targets\/(.+)$/);
+    if (req.method === 'PUT' && updateTargetMatch) {
+      const addr = decodeURIComponent(updateTargetMatch[1]).toLowerCase();
+      const body = await readBody(req);
+      const updated = copyTargetManager.update(addr, body);
+      if (!updated) return json(res, 404, { error: 'Address not found' });
+      if (bot) await bot.reloadTargets();
+      broadcastSnapshot();
+      return json(res, 200, { ok: true, target: copyTargetManager.get(addr) });
+    }
+
+    // POST /api/positions/:tokenId/exit  (body: { shares: number })
+    const exitPosMatch = pathname.match(/^\/api\/positions\/([^/]+)\/exit$/);
+    if (req.method === 'POST' && exitPosMatch) {
+      const tokenId = decodeURIComponent(exitPosMatch[1]);
+      const body = await readBody(req);
+      const shares = parseFloat(body.shares);
+      if (!shares || shares <= 0) return json(res, 400, { error: 'Invalid shares amount' });
+      try {
+        const executor = await getExitExecutor();
+        const result = await executor.exitPosition(tokenId, shares);
+        broadcastSnapshot();
+        return json(res, 200, { ok: true, ...result });
+      } catch (e: any) {
+        return json(res, 500, { error: e.message });
+      }
     }
 
     // POST /api/redeem/:conditionId  (body: { outcomeIndex: number })
@@ -705,6 +922,8 @@ wss.on('connection', async (ws, req) => {
     sessionStats: stats,
     recentTrades: tradeHistory.slice(0, 100),
     accountSummary,
+    copyTargets: copyTargetManager.getAll(),
+    aiReviewState: reviewScheduler.getState(),
     config: {
       targetWallet: config.targetWallet,
       minTradeSize: config.trading.minTradeSize,
@@ -773,10 +992,23 @@ setInterval(() => fetchAccountSummary().catch(console.error), 5 * 60 * 1000);
 await loadTradeHistory();
 fetchAccountSummary().catch(console.error);
 
+// ─── Trader Discovery ────────────────────────────────────────────────────────
+const traderDiscovery = new TraderDiscovery();
+await traderDiscovery.load();
+
+// ─── AI Review Scheduler ─────────────────────────────────────────────────────
+const reviewScheduler = new ReviewScheduler(
+  traderDiscovery,
+  () => bot,
+  () => tradeHistory,
+  () => broadcastSnapshot(),
+);
+reviewScheduler.start();
+
 server.listen(PORT, () => {
   console.log(`\n📊 Dashboard: http://localhost:${PORT}`);
   console.log('   Open in your browser to monitor the bot\n');
 });
 
-process.on('SIGINT', () => { stopBot(); server.close(); process.exit(0); });
-process.on('SIGTERM', () => { stopBot(); server.close(); process.exit(0); });
+process.on('SIGINT', () => { reviewScheduler.stop(); stopBot(); server.close(); process.exit(0); });
+process.on('SIGTERM', () => { reviewScheduler.stop(); stopBot(); server.close(); process.exit(0); });

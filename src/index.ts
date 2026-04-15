@@ -1,13 +1,16 @@
 import { config, validateConfig } from './config.js';
-import { TradeMonitor } from './monitor.js';
+import { MultiMonitor } from './multi-monitor.js';
+import type { TaggedTrade } from './multi-monitor.js';
 import { WebSocketMonitor } from './websocket-monitor.js';
 import type { Trade } from './monitor.js';
 import { TradeExecutor } from './trader.js';
 import { PositionTracker } from './positions.js';
 import { RiskManager } from './risk-manager.js';
+import { copyTargetManager } from './copy-target-manager.js';
+import type { CopyTarget } from './copy-target-manager.js';
 
 export class PolymarketCopyBot {
-  private monitor: TradeMonitor;
+  private multiMonitor: MultiMonitor;
   private wsMonitor?: WebSocketMonitor;
   private executor: TradeExecutor;
   private positions: PositionTracker;
@@ -27,16 +30,20 @@ export class PolymarketCopyBot {
   public onTradeFailed?: (trade: Trade, reason: string) => void;
 
   constructor() {
-    this.monitor = new TradeMonitor();
+    this.multiMonitor = new MultiMonitor();
     this.executor = new TradeExecutor();
     this.positions = new PositionTracker();
     this.risk = new RiskManager(this.positions);
   }
-  
+
   async initialize(): Promise<void> {
     console.log('🤖 Polymarket Copy Trading Bot');
     console.log('================================');
-    console.log(`Target wallet: ${config.targetWallet}`);
+    const targets = copyTargetManager.getEnabled();
+    console.log(`Copy targets: ${targets.length} address(es)`);
+    for (const t of targets) {
+      console.log(`  • ${t.address} — ${t.label}`);
+    }
     console.log(`Position multiplier: ${config.trading.positionSizeMultiplier * 100}%`);
     console.log(`Max trade size: ${config.trading.maxTradeSize} USDC`);
     console.log(`Order type: ${config.trading.orderType}`);
@@ -53,75 +60,53 @@ export class PolymarketCopyBot {
     console.log(`⏰ Bot start time: ${new Date(this.botStartTime).toISOString()}`);
     console.log('   (Only trades after this time will be copied)\n');
 
-    await this.monitor.initialize();
     await this.executor.initialize();
     await this.reconcilePositions();
+
+    // Start multi-wallet monitor
+    await this.multiMonitor.start(targets);
+    this.multiMonitor.on('trade', (tagged: TaggedTrade) => {
+      this.handleNewTrade(tagged).catch(console.error);
+    });
 
     if (config.monitoring.useWebSocket) {
       this.wsMonitor = new WebSocketMonitor();
       try {
         const wsAuth = this.executor.getWsAuth();
         const channel = config.monitoring.useUserChannel ? 'user' : 'market';
-        await this.wsMonitor.initialize(this.handleNewTrade.bind(this), channel, wsAuth);
-        console.log(`✅ WebSocket monitor initialized (${channel} channel)\n`);
-
-        if (channel === 'market' && config.monitoring.wsAssetIds.length > 0) {
-          for (const assetId of config.monitoring.wsAssetIds) {
-            await this.wsMonitor.subscribeToMarket(assetId);
-          }
-        }
-
-        if (channel === 'user' && config.monitoring.wsMarketIds.length > 0) {
-          for (const marketId of config.monitoring.wsMarketIds) {
-            await this.wsMonitor.subscribeToCondition(marketId);
-          }
-        }
+        await this.wsMonitor.initialize(async () => {}, channel, wsAuth);
+        console.log(`✅ WebSocket monitor initialized (${channel} channel — price updates only)\n`);
       } catch (error) {
-        console.error('⚠️  WebSocket initialization failed, falling back to REST API only');
-        console.error('   Error:', error);
+        console.error('⚠️  WebSocket initialization failed, continuing with REST polling only');
         this.wsMonitor = undefined;
       }
     }
   }
-  
+
   async start(): Promise<void> {
     this.isRunning = true;
-    const monitoringMethods = [];
-    if (this.wsMonitor) monitoringMethods.push('WebSocket');
-    monitoringMethods.push('REST API');
+    console.log(`🚀 Bot started! Monitoring ${this.multiMonitor.getActiveAddresses().length} wallet(s) via REST polling\n`);
 
-    console.log(`🚀 Bot started! Monitoring via: ${monitoringMethods.join(' + ')}\n`);
-
+    // Keep-alive — polling is driven by MultiMonitor's internal setIntervals
     while (this.isRunning) {
-      try {
-        await this.monitor.pollForNewTrades(this.handleNewTrade.bind(this));
-        this.monitor.pruneProcessedHashes();
-      } catch (error) {
-        console.error('Error in monitoring loop:', error);
-      }
-
-      await this.sleep(config.monitoring.pollInterval);
+      await this.sleep(5000);
     }
   }
-  
-  private async handleNewTrade(trade: Trade): Promise<void> {
-    if (trade.timestamp && trade.timestamp < this.botStartTime) {
-      return;
-    }
+
+  private async handleNewTrade(trade: TaggedTrade): Promise<void> {
+    if (trade.timestamp && trade.timestamp < this.botStartTime) return;
 
     const tradeKeys = this.getTradeKeys(trade);
-    if (tradeKeys.some((key) => this.processedTrades.has(key))) {
-      return;
-    }
-
-    for (const key of tradeKeys) {
-      this.processedTrades.add(key);
-    }
+    if (tradeKeys.some((key) => this.processedTrades.has(key))) return;
+    for (const key of tradeKeys) this.processedTrades.add(key);
     this.pruneProcessedTrades();
     this.stats.tradesDetected++;
 
+    const target = trade.copyTarget;
+
     console.log('\n' + '='.repeat(50));
     console.log(`🎯 NEW TRADE DETECTED`);
+    console.log(`   Source: ${target.label} (${trade.sourceAddress})`);
     console.log(`   Time: ${new Date(trade.timestamp).toISOString()}`);
     console.log(`   Market: ${trade.market}`);
     console.log(`   Side: ${trade.side} ${trade.outcome}`);
@@ -129,8 +114,11 @@ export class PolymarketCopyBot {
     console.log(`   Token ID: ${trade.tokenId}`);
     console.log('='.repeat(50));
 
-    if (trade.side === 'SELL') {
-      console.log('⚠️  Skipping SELL trade (BUY-only safeguard enabled)');
+    // Per-target market keyword filter
+    const filterResult = this.checkMarketFilter(trade.market, target);
+    if (!filterResult.allowed) {
+      console.log(`⏭️  Skipping trade — market filter: ${filterResult.reason}`);
+      this.onTradeFailed?.(trade, filterResult.reason);
       return;
     }
 
@@ -138,8 +126,20 @@ export class PolymarketCopyBot {
       await this.wsMonitor.subscribeToMarket(trade.tokenId);
     }
 
-    const copyNotional = this.executor.calculateCopySize(trade.size);
+    // Calculate copy size using per-target settings (fallback to global config)
+    const multiplier = target.settings.multiplier ?? config.trading.positionSizeMultiplier;
+    const maxSize = target.settings.maxTradeSize ?? config.trading.maxTradeSize;
+    const minSize = target.settings.minTradeSize ?? config.trading.minTradeSize;
+    const copyNotional = Math.max(minSize, Math.min(maxSize, trade.size * multiplier));
+
+    // Per-target per-market notional cap (swap config temporarily — JS is single-threaded)
+    const savedPerMarket = config.risk.maxPerMarketNotional;
+    if (target.settings.maxPerMarketNotional > 0) {
+      config.risk.maxPerMarketNotional = target.settings.maxPerMarketNotional;
+    }
     const riskCheck = this.risk.checkTrade(trade, copyNotional);
+    config.risk.maxPerMarketNotional = savedPerMarket;
+
     if (!riskCheck.allowed) {
       console.log(`⚠️  Risk check blocked trade: ${riskCheck.reason}`);
       return;
@@ -162,9 +162,7 @@ export class PolymarketCopyBot {
     } catch (error: any) {
       this.stats.tradesFailed++;
       console.log(`❌ Failed to copy trade`);
-      if (error?.message) {
-        console.log(`   Reason: ${error.message}`);
-      }
+      if (error?.message) console.log(`   Reason: ${error.message}`);
       console.log(`📊 Session Stats: ${this.stats.tradesCopied}/${this.stats.tradesDetected} copied, ${this.stats.tradesFailed} failed`);
       this.onTradeFailed?.(trade, error?.message || 'Unknown error');
     }
@@ -177,7 +175,6 @@ export class PolymarketCopyBot {
         console.log('🧾 Positions: none found (fresh session)');
         return;
       }
-
       const { loaded, skipped } = this.positions.loadFromClobPositions(positions);
       const totalNotional = this.positions.getTotalNotional();
       console.log(`🧾 Positions loaded: ${loaded} (skipped ${skipped}), total notional ≈ ${totalNotional.toFixed(2)} USDC`);
@@ -185,9 +182,25 @@ export class PolymarketCopyBot {
       console.log(`🧾 Positions reconciliation failed: ${error.message || 'Unknown error'}`);
     }
   }
-  
+
+  /** Manually exit a position by placing a FOK sell order for all shares. */
+  async exitPosition(tokenId: string, shares: number) {
+    return this.executor.exitPosition(tokenId, shares);
+  }
+
+  /** Reload monitors when copy targets change at runtime. */
+  async reloadTargets(): Promise<void> {
+    const targets = copyTargetManager.getEnabled();
+    await this.multiMonitor.reload(targets);
+    console.log(`🔄 Copy targets reloaded: ${targets.length} active wallet(s)`);
+  }
+
   getStats() {
     return { ...this.stats };
+  }
+
+  getActiveAddresses(): string[] {
+    return this.multiMonitor.getActiveAddresses();
   }
 
   get running(): boolean {
@@ -196,15 +209,12 @@ export class PolymarketCopyBot {
 
   stop(): void {
     this.isRunning = false;
-
-    if (this.wsMonitor) {
-      this.wsMonitor.close();
-    }
-
+    this.multiMonitor.stop();
+    if (this.wsMonitor) this.wsMonitor.close();
     console.log('\n🛑 Bot stopped');
     this.printStats();
   }
-  
+
   printStats(): void {
     console.log('\n📊 Session Statistics:');
     console.log(`   Trades detected: ${this.stats.tradesDetected}`);
@@ -212,29 +222,52 @@ export class PolymarketCopyBot {
     console.log(`   Trades failed: ${this.stats.tradesFailed}`);
     console.log(`   Total volume: ${this.stats.totalVolume.toFixed(2)} USDC`);
   }
-  
+
+  /**
+   * Checks market keyword filters. Per-target settings override global config.
+   * Allow list is checked first; then block list.
+   */
+  private checkMarketFilter(market: string, target: CopyTarget): { allowed: boolean; reason: string } {
+    const title = market.toLowerCase();
+
+    // Use target's per-address keywords if set, otherwise fall back to global config
+    const allowKeywords = target.settings.allowKeywords.length > 0
+      ? target.settings.allowKeywords
+      : config.filters.allowKeywords;
+    const blockKeywords = target.settings.blockKeywords.length > 0
+      ? target.settings.blockKeywords
+      : config.filters.blockKeywords;
+
+    if (allowKeywords.length > 0) {
+      const matched = allowKeywords.find((kw) => title.includes(kw.toLowerCase()));
+      if (!matched) {
+        return { allowed: false, reason: `market not in allowlist (title: "${market.slice(0, 60)}")` };
+      }
+    }
+
+    if (blockKeywords.length > 0) {
+      const hit = blockKeywords.find((kw) => title.includes(kw.toLowerCase()));
+      if (hit) {
+        return { allowed: false, reason: `blocked keyword "${hit}" in market: "${market.slice(0, 60)}"` };
+      }
+    }
+
+    return { allowed: true, reason: '' };
+  }
+
   private sleep(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   private getTradeKeys(trade: Trade): string[] {
     const keys: string[] = [];
-
-    if (trade.txHash) {
-      keys.push(trade.txHash);
-    }
-
-    const fallbackKey = `${trade.tokenId}|${trade.side}|${trade.size}|${trade.price}|${trade.timestamp}`;
-    keys.push(fallbackKey);
-
+    if (trade.txHash) keys.push(trade.txHash);
+    keys.push(`${trade.tokenId}|${trade.side}|${trade.size}|${trade.price}|${trade.timestamp}`);
     return keys;
   }
 
   private pruneProcessedTrades(): void {
-    if (this.processedTrades.size <= this.maxProcessedTrades) {
-      return;
-    }
-
+    if (this.processedTrades.size <= this.maxProcessedTrades) return;
     const entries = Array.from(this.processedTrades);
     this.processedTrades = new Set(entries.slice(-Math.floor(this.maxProcessedTrades / 2)));
   }
@@ -242,18 +275,18 @@ export class PolymarketCopyBot {
 
 async function main() {
   const bot = new PolymarketCopyBot();
-  
+
   process.on('SIGINT', () => {
     console.log('\n\nReceived SIGINT, shutting down...');
     bot.stop();
     process.exit(0);
   });
-  
+
   process.on('SIGTERM', () => {
     bot.stop();
     process.exit(0);
   });
-  
+
   try {
     await bot.initialize();
     await bot.start();
@@ -265,7 +298,9 @@ async function main() {
 
 // Only run when invoked directly, not when imported as a module
 const entryFile = process.argv[1] || '';
-if (entryFile.endsWith('src/index.ts') || entryFile.endsWith('src/index.js') ||
-    entryFile.endsWith('src\\index.ts') || entryFile.endsWith('src\\index.js')) {
+if (
+  entryFile.endsWith('src/index.ts') || entryFile.endsWith('src/index.js') ||
+  entryFile.endsWith('src\\index.ts') || entryFile.endsWith('src\\index.js')
+) {
   main();
 }
