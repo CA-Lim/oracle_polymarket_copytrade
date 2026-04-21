@@ -8,6 +8,7 @@ import { PositionTracker } from './positions.js';
 import { RiskManager } from './risk-manager.js';
 import { copyTargetManager } from './copy-target-manager.js';
 import type { CopyTarget } from './copy-target-manager.js';
+import { AutoRedeemer } from './redeemer.js';
 
 export class PolymarketCopyBot {
   private multiMonitor: MultiMonitor;
@@ -15,6 +16,7 @@ export class PolymarketCopyBot {
   private executor: TradeExecutor;
   private positions: PositionTracker;
   private risk: RiskManager;
+  private redeemer: AutoRedeemer;
   private isRunning: boolean = false;
   private processedTrades: Set<string> = new Set();
   private botStartTime: number = 0;
@@ -34,6 +36,7 @@ export class PolymarketCopyBot {
     this.executor = new TradeExecutor();
     this.positions = new PositionTracker();
     this.risk = new RiskManager(this.positions);
+    this.redeemer = new AutoRedeemer();
   }
 
   async initialize(): Promise<void> {
@@ -62,6 +65,7 @@ export class PolymarketCopyBot {
 
     await this.executor.initialize();
     await this.reconcilePositions();
+    this.redeemer.start();
 
     // Start multi-wallet monitor
     await this.multiMonitor.start(targets);
@@ -130,7 +134,14 @@ export class PolymarketCopyBot {
     const multiplier = target.settings.multiplier ?? config.trading.positionSizeMultiplier;
     const maxSize = target.settings.maxTradeSize ?? config.trading.maxTradeSize;
     const minSize = target.settings.minTradeSize ?? config.trading.minTradeSize;
-    const copyNotional = Math.max(minSize, Math.min(maxSize, trade.size * multiplier));
+    const scaled = trade.size * multiplier;
+    // Polymarket CLOB enforces $1 minimum for FOK/FAK. Skip rather than inflate.
+    const exchangeMin = (config.trading.orderType === 'FOK' || config.trading.orderType === 'FAK') ? 1 : minSize;
+    if (scaled < exchangeMin) {
+      console.log(`⏭️  Skipping trade — scaled size $${scaled.toFixed(3)} below exchange minimum $${exchangeMin}`);
+      return;
+    }
+    const copyNotional = Math.min(maxSize, scaled);
 
     // Per-target per-market notional cap (swap config temporarily — JS is single-threaded)
     const savedPerMarket = config.risk.maxPerMarketNotional;
@@ -146,6 +157,13 @@ export class PolymarketCopyBot {
     }
 
     try {
+      const drift = await this.executor.checkPriceDrift(trade.tokenId, trade.side, trade.price);
+      if (drift.drifted) {
+        console.log(`⏭️  Skipping trade — price drifted ${(drift.driftPct * 100).toFixed(1)}% from source entry (${trade.price.toFixed(3)} → ${drift.currentPrice.toFixed(3)})`);
+        this.onTradeFailed?.(trade, `price drifted ${(drift.driftPct * 100).toFixed(1)}%`);
+        return;
+      }
+
       const result = await this.executor.executeCopyTrade(trade, copyNotional);
       this.risk.recordFill({
         trade,
@@ -210,6 +228,7 @@ export class PolymarketCopyBot {
   stop(): void {
     this.isRunning = false;
     this.multiMonitor.stop();
+    this.redeemer.stop();
     if (this.wsMonitor) this.wsMonitor.close();
     console.log('\n🛑 Bot stopped');
     this.printStats();

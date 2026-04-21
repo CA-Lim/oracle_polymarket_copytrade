@@ -168,8 +168,10 @@ export class TradeExecutor {
     const { positionSizeMultiplier, maxTradeSize, minTradeSize, orderType } = config.trading;
     let size = originalSize * positionSizeMultiplier;
     size = Math.min(size, maxTradeSize);
-    const marketMin = orderType === 'FOK' || orderType === 'FAK' ? 1 : minTradeSize;
-    size = Math.max(size, marketMin);
+    // FOK/FAK orders have a $1 minimum enforced by the Polymarket CLOB.
+    // Return 0 if the scaled size is below the exchange floor so the caller can skip.
+    const exchangeMin = (orderType === 'FOK' || orderType === 'FAK') ? 1 : minTradeSize;
+    if (size < exchangeMin) return 0;
     return Math.round(size * 100) / 100;
   }
   
@@ -178,9 +180,11 @@ export class TradeExecutor {
     return this.calculateSharesFromNotional(notional, price);
   }
 
-  calculateSharesFromNotional(notional: number, price: number): number {
+  calculateSharesFromNotional(notional: number, price: number, tickSize: number = 0.01): number {
     const shares = notional / price;
-    return Math.round(shares * 10000) / 10000;
+    const precision = Math.round(1 / tickSize);
+    // Floor (not round) to avoid submitting more shares than notional covers
+    return Math.floor(shares * precision) / precision;
   }
 
   async getMarketMetadata(tokenId: string): Promise<MarketMetadata> {
@@ -246,6 +250,20 @@ export class TradeExecutor {
     }
 
     return validPrice;
+  }
+
+  async checkPriceDrift(
+    tokenId: string,
+    side: 'BUY' | 'SELL',
+    sourcePrice: number,
+    maxDriftPct: number = 0.15,
+  ): Promise<{ drifted: boolean; currentPrice: number; driftPct: number }> {
+    const orderbook = await this.clobClient.getOrderBook(tokenId);
+    const currentPrice = this.getBestPrice(orderbook, side, sourcePrice);
+    const driftPct = (currentPrice - sourcePrice) / sourcePrice;
+    // For BUY: positive drift means price rose (worse entry). For SELL: negative drift means price fell.
+    const adverseDrift = side === 'BUY' ? driftPct : -driftPct;
+    return { drifted: adverseDrift > maxDriftPct, currentPrice, driftPct };
   }
 
   private getBestPrice(orderbook: any, side: 'BUY' | 'SELL', fallback: number): number {
@@ -401,7 +419,7 @@ export class TradeExecutor {
     const bestPrice = this.getBestPrice(orderbook, originalTrade.side, originalTrade.price);
     const limitPrice = this.applySlippage(bestPrice, originalTrade.side, slippageTolerance);
     const validatedPrice = await this.validatePrice(limitPrice, originalTrade.tokenId);
-    const copyShares = this.calculateSharesFromNotional(copyNotional, validatedPrice);
+    const copyShares = this.calculateSharesFromNotional(copyNotional, validatedPrice, metadata.tickSize);
 
     console.log(`   Limit price: ${validatedPrice.toFixed(4)}`);
     console.log(`   Copy shares: ${copyShares}`);
@@ -454,7 +472,7 @@ export class TradeExecutor {
     const bestPrice = this.getBestPrice(orderbook, originalTrade.side, originalTrade.price);
     const marketPrice = this.applySlippage(bestPrice, originalTrade.side, slippageTolerance);
     const validatedPrice = await this.validatePrice(marketPrice, originalTrade.tokenId);
-    const copyShares = this.calculateSharesFromNotional(copyNotional, validatedPrice);
+    const copyShares = this.calculateSharesFromNotional(copyNotional, validatedPrice, metadata.tickSize);
     console.log(`   Market price: ${validatedPrice.toFixed(4)}`);
     console.log(`   Copy shares: ${copyShares}`);
 
