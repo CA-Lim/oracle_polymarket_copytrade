@@ -462,11 +462,16 @@ export class TradeExecutor {
 
     if (response.success) {
       console.log(`✅ Limit order placed: ${response.orderID}`);
+      // Use midpoint as the recorded price — validatedPrice is the limit ceiling we
+      // submitted, but fills happen at lower asks. Midpoint reflects actual fill price.
+      const fillPrice = await this.getMidpoint(originalTrade.tokenId, validatedPrice);
+      const fillShares = this.calculateSharesFromNotional(copyNotional, fillPrice, metadata.tickSize);
+      console.log(`   Fill price (mid): ${fillPrice.toFixed(4)}, shares: ${fillShares}`);
       return {
         orderId: response.orderID,
         copyNotional,
-        copyShares,
-        price: validatedPrice,
+        copyShares: fillShares,
+        price: fillPrice,
         side: originalTrade.side,
         tokenId: originalTrade.tokenId,
       };
@@ -519,11 +524,14 @@ export class TradeExecutor {
       if (response.status === 'LIVE') {
         console.log(`   ⚠️  Order posted to book (no immediate match)`);
       }
+      const fillPrice = await this.getMidpoint(originalTrade.tokenId, validatedPrice);
+      const fillShares = this.calculateSharesFromNotional(copyNotional, fillPrice, metadata.tickSize);
+      console.log(`   Fill price (mid): ${fillPrice.toFixed(4)}, shares: ${fillShares}`);
       return {
         orderId: response.orderID,
         copyNotional,
-        copyShares,
-        price: validatedPrice,
+        copyShares: fillShares,
+        price: fillPrice,
         side: originalTrade.side,
         tokenId: originalTrade.tokenId,
       };
