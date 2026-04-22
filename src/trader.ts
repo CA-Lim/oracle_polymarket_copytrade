@@ -288,6 +288,11 @@ export class TradeExecutor {
     return fallback;
   }
 
+  private getBestPrice(orderbook: any, side: 'BUY' | 'SELL', fallback: number): number {
+    if (side === 'BUY') return Number(orderbook.asks[0]?.price || fallback);
+    return Number(orderbook.bids[0]?.price || fallback);
+  }
+
   getWalletAddress(): string {
     return this.wallet.address;
   }
