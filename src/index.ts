@@ -69,7 +69,7 @@ export class PolymarketCopyBot {
     await this.reconcilePositions();
     this.redeemer.start();
     this.checkStopLoss().catch(console.error);
-    this.stopLossTimer = setInterval(() => this.checkStopLoss().catch(console.error), 10 * 60 * 1000);
+    this.stopLossTimer = setInterval(() => this.checkStopLoss().catch(console.error), 2 * 60 * 1000);
 
     // Start multi-wallet monitor
     await this.multiMonitor.start(targets);
