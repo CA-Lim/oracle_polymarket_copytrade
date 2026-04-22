@@ -20,6 +20,7 @@ export class PolymarketCopyBot {
   private stopLossTimer?: NodeJS.Timeout;
   private cutPositions = new Set<string>();
   private isRunning: boolean = false;
+  private tradeQueue: Promise<void> = Promise.resolve();
   private processedTrades: Set<string> = new Set();
   private botStartTime: number = 0;
   private readonly maxProcessedTrades = 10000;
@@ -102,6 +103,13 @@ export class PolymarketCopyBot {
   }
 
   private async handleNewTrade(trade: TaggedTrade): Promise<void> {
+    // Serialize all trade processing — prevents concurrent trades from all passing
+    // the per-market notional check before any fill is recorded
+    this.tradeQueue = this.tradeQueue.then(() => this.processTrade(trade)).catch(() => {});
+    return this.tradeQueue;
+  }
+
+  private async processTrade(trade: TaggedTrade): Promise<void> {
     if (trade.timestamp && trade.timestamp < this.botStartTime) return;
 
     const tradeKeys = this.getTradeKeys(trade);
