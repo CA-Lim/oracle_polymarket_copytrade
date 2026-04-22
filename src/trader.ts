@@ -273,6 +273,10 @@ export class TradeExecutor {
     return Number(orderbook.bids[0]?.price || fallback);
   }
 
+  getWalletAddress(): string {
+    return this.wallet.address;
+  }
+
   private applySlippage(price: number, side: 'BUY' | 'SELL', slippage: number): number {
     if (side === 'BUY') {
       return Math.min(price * (1 + slippage), 0.99);

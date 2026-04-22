@@ -17,6 +17,8 @@ export class PolymarketCopyBot {
   private positions: PositionTracker;
   private risk: RiskManager;
   private redeemer: AutoRedeemer;
+  private stopLossTimer?: NodeJS.Timeout;
+  private cutPositions = new Set<string>();
   private isRunning: boolean = false;
   private processedTrades: Set<string> = new Set();
   private botStartTime: number = 0;
@@ -66,6 +68,8 @@ export class PolymarketCopyBot {
     await this.executor.initialize();
     await this.reconcilePositions();
     this.redeemer.start();
+    this.checkStopLoss().catch(console.error);
+    this.stopLossTimer = setInterval(() => this.checkStopLoss().catch(console.error), 10 * 60 * 1000);
 
     // Start multi-wallet monitor
     await this.multiMonitor.start(targets);
@@ -229,9 +233,68 @@ export class PolymarketCopyBot {
     this.isRunning = false;
     this.multiMonitor.stop();
     this.redeemer.stop();
+    if (this.stopLossTimer) { clearInterval(this.stopLossTimer); this.stopLossTimer = undefined; }
     if (this.wsMonitor) this.wsMonitor.close();
     console.log('\n🛑 Bot stopped');
     this.printStats();
+  }
+
+  private async checkStopLoss(): Promise<void> {
+    const THRESHOLD = 0.38;
+    const MIN_ENTRY = 0.30;
+    const walletAddress = this.executor.getWalletAddress();
+
+    let apiPositions: any[];
+    try {
+      const res = await fetch(`https://data-api.polymarket.com/positions?user=${walletAddress}&sizeThreshold=.01`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      apiPositions = await res.json();
+    } catch (e: any) {
+      console.error('⚡ Stop-loss: failed to fetch positions:', e.message);
+      return;
+    }
+
+    // Count positions per conditionId — >1 means both sides held (paired/hedged)
+    const conditionCount = new Map<string, number>();
+    for (const p of apiPositions) {
+      if (p.conditionId) conditionCount.set(p.conditionId, (conditionCount.get(p.conditionId) ?? 0) + 1);
+    }
+
+    let triggered = 0;
+    for (const p of apiPositions) {
+      const tokenId = p.asset;
+      const curPrice = parseFloat(p.curPrice ?? 0);
+
+      if (this.cutPositions.has(tokenId)) continue;
+      if (curPrice >= 0.99 || curPrice <= 0.01) continue;
+
+      const posState = this.positions.getPosition(tokenId);
+      if (!posState || posState.shares <= 0) continue;
+
+      const entryPrice = posState.avgPrice;
+      if (entryPrice <= MIN_ENTRY) continue;
+      if (curPrice >= entryPrice * THRESHOLD) continue;
+
+      if ((conditionCount.get(p.conditionId) ?? 0) > 1) {
+        console.log(`⚡ Stop-loss: skipping paired position ${(p.title || tokenId).slice(0, 50)}`);
+        continue;
+      }
+
+      const label = (p.title ?? tokenId).slice(0, 60);
+      const lossPct = ((1 - curPrice / entryPrice) * 100).toFixed(0);
+      console.log(`⚡ Stop-loss: ${label}`);
+      console.log(`   Entry ${entryPrice.toFixed(3)} → Current ${curPrice.toFixed(3)} (-${lossPct}%)`);
+      try {
+        await this.executor.exitPosition(tokenId, posState.shares);
+        this.cutPositions.add(tokenId);
+        triggered++;
+        console.log(`✅ Stop-loss executed`);
+      } catch (e: any) {
+        console.error(`❌ Stop-loss failed: ${e.message}`);
+      }
+    }
+
+    if (triggered === 0) console.log('⚡ Stop-loss: no positions triggered');
   }
 
   printStats(): void {
