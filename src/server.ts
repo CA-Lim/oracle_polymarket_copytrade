@@ -608,6 +608,14 @@ const server = http.createServer(async (req, res) => {
         for (const t of raw) {
           const txHash: string = t.transactionHash || '';
           if (!txHash || existingTxHashes.has(txHash)) continue;
+
+          // Skip if already recorded by onTradeCopied (same tokenId+side within 120s)
+          const tMs = (t.timestamp ?? 0) * 1000;
+          const alreadyRecorded = tradeHistory.some(
+            (e) => e.tokenId === t.asset && e.side === t.side?.toUpperCase() && Math.abs(e.timestamp - tMs) < 120_000
+          );
+          if (alreadyRecorded) continue;
+
           addToHistory({
             id: txHash,
             timestamp: (t.timestamp ?? 0) * 1000,   // API returns seconds
