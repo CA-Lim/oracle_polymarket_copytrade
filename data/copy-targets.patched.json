@@ -1,0 +1,479 @@
+{
+  "version": 1,
+  "updatedAt": 1776411074376,
+  "targets": [
+    {
+      "address": "0xee613b3fc183ee44f9da9c05f53e2da107e3debf",
+      "enabled": true,
+      "label": "Default (seeded from TARGET_WALLET)",
+      "topCategories": [],
+      "aiReason": "Seeded from existing TARGET_WALLET configuration",
+      "addedBy": "manual",
+      "addedAt": 1776243442673,
+      "settings": {
+        "allowKeywords": [],
+        "blockKeywords": [],
+        "multiplier": 0.03,
+        "maxTradeSize": 3,
+        "minTradeSize": 0.5,
+        "maxPerMarketNotional": 5
+      }
+    },
+    {
+      "address": "0x204f72f35326db932158cba6adff0b9a1da95e14",
+      "enabled": false,
+      "label": "Sports Specialist - Tennis & Football",
+      "topCategories": [
+        "sports"
+      ],
+      "aiReason": "Elite sports trader with 2901 trades across 459 markets. 54% win rate, $278k PnL. Deep expertise in tennis (ATP/WTA), football (European leagues), and niche sports. High volume, proven consistency.",
+      "addedBy": "ai",
+      "settings": {
+        "allowKeywords": [
+          "vs",
+          "vs.",
+          "o/u",
+          "win on",
+          "draw",
+          "spread",
+          "match",
+          "tennis",
+          "football",
+          "soccer",
+          "basketball",
+          "hockey",
+          "nba",
+          "nhl",
+          "mlb",
+          "nfl",
+          "busan",
+          "wuning",
+          "santa cruz",
+          "tallahassee",
+          "over/under",
+          "halftime"
+        ],
+        "blockKeywords": [
+          "crypto",
+          "bitcoin",
+          "temperature",
+          "weather",
+          "price prediction"
+        ],
+        "multiplier": 0.06,
+        "maxTradeSize": 8,
+        "minTradeSize": 0.5,
+        "maxPerMarketNotional": 18
+      },
+      "addedAt": 1776244556915
+    },
+    {
+      "address": "0x507e52ef684ca2dd91f90a9d26d149dd3288beae",
+      "enabled": false,
+      "label": "Multi-Sport & Esports Trader",
+      "topCategories": [
+        "sports"
+      ],
+      "aiReason": "High-volume diversified trader (2401 trades, 502 markets). Lower 39% win rate but exceptional $695k PnL suggests strong risk management and selective bet sizing. Covers tennis, football, and esports (LoL).",
+      "addedBy": "ai",
+      "settings": {
+        "allowKeywords": [
+          "vs",
+          "vs.",
+          "o/u",
+          "win on",
+          "draw",
+          "spread",
+          "match",
+          "tennis",
+          "football",
+          "soccer",
+          "basketball",
+          "hockey",
+          "nba",
+          "nhl",
+          "mlb",
+          "nfl",
+          "lol",
+          "league of legends",
+          "esports",
+          "valorant",
+          "counter-strike",
+          "dota",
+          "busan",
+          "wuning",
+          "santa cruz",
+          "win on"
+        ],
+        "blockKeywords": [
+          "crypto",
+          "bitcoin",
+          "weather",
+          "temperature"
+        ],
+        "multiplier": 0.05,
+        "maxTradeSize": 6,
+        "minTradeSize": 0.5,
+        "maxPerMarketNotional": 15
+      },
+      "addedAt": 1776244556916
+    },
+    {
+      "address": "0x5d1d9cfd66ee3068c2a8a57dedf1e1b006dcafd2",
+      "enabled": true,
+      "label": "Premium Sports Generalist - Tennis, Football, Esports",
+      "topCategories": [
+        "sports"
+      ],
+      "aiReason": "Elite-tier trader: 60% win rate, $326k PnL across 2711 trades in 610 markets. Balanced portfolio spanning tennis, European football (Bundesliga, Serie A, Premier League), esports (LoL), and specialty sports. Consistent profitability.",
+      "addedBy": "ai",
+      "settings": {
+        "allowKeywords": [
+          "vs",
+          "vs.",
+          "o/u",
+          "win on",
+          "draw",
+          "spread",
+          "match",
+          "tennis",
+          "football",
+          "soccer",
+          "basketball",
+          "hockey",
+          "nba",
+          "nhl",
+          "mlb",
+          "nfl",
+          "lol",
+          "league of legends",
+          "counter-strike",
+          "valorant",
+          "esports",
+          "bundesliga",
+          "serie a",
+          "premier league",
+          "la liga",
+          "champions league",
+          "busan",
+          "wuning",
+          "santa cruz",
+          "tallahassee",
+          "over/under"
+        ],
+        "blockKeywords": [
+          "crypto",
+          "bitcoin",
+          "weather",
+          "temperature",
+          "price prediction"
+        ],
+        "multiplier": 0.04,
+        "maxTradeSize": 5,
+        "minTradeSize": 0.5,
+        "maxPerMarketNotional": 8
+      },
+      "addedAt": 1776244556916
+    },
+    {
+      "address": "0xa509ae942ac8d8bc3f8c5df30cb6ae2c9b13ae46",
+      "enabled": false,
+      "label": "Specialist - Tennis & Niche Sports",
+      "topCategories": [
+        "sports"
+      ],
+      "aiReason": "Focused sports trader: 58% win rate, $13.8k PnL on 3352 trades across 209 markets. Strong in tennis (ATP/WTA) and lower-tier football. High trade count but modest profits suggest lower bet sizing or selective strategy.",
+      "addedBy": "ai",
+      "settings": {
+        "allowKeywords": [
+          "vs",
+          "vs.",
+          "o/u",
+          "win on",
+          "draw",
+          "spread",
+          "match",
+          "tennis",
+          "football",
+          "soccer",
+          "busan",
+          "wuning",
+          "santa cruz",
+          "tallahassee",
+          "barcelona",
+          "bmw open",
+          "atp",
+          "wta",
+          "palmeiras",
+          "flamengo",
+          "bragantino",
+          "mineiro",
+          "blooming",
+          "cristal"
+        ],
+        "blockKeywords": [
+          "crypto",
+          "bitcoin",
+          "weather"
+        ],
+        "multiplier": 0.03,
+        "maxTradeSize": 3,
+        "minTradeSize": 0.5,
+        "maxPerMarketNotional": 8
+      },
+      "addedAt": 1776244556916
+    },
+    {
+      "address": "0xcb5b700d9cb8d1e0e8f2975f363583183c10f243",
+      "enabled": true,
+      "label": "Esports Specialist",
+      "topCategories": [
+        "sports"
+      ],
+      "aiReason": "Focused esports trader: 65% win rate, $41k PnL across 3013 trades in 327 markets. Primary expertise in Dota 2, League of Legends, and KHL (hockey). Solid risk-adjusted returns in gaming verticals.",
+      "addedBy": "ai",
+      "settings": {
+        "allowKeywords": [
+          "dota 2",
+          "lol",
+          "league of legends",
+          "khl",
+          "esports",
+          "valorant",
+          "counter-strike",
+          "cs:",
+          "bo1",
+          "bo3",
+          "bo5",
+          "game 1 winner",
+          "game 2 winner",
+          "game 3 winner",
+          "map winner",
+          "map 1",
+          "map 2",
+          "map 3",
+          "vs",
+          "vs.",
+          "o/u",
+          "win on",
+          "draw",
+          "spread",
+          "match",
+          "nba",
+          "nhl",
+          "mlb"
+        ],
+        "blockKeywords": [
+          "crypto",
+          "bitcoin",
+          "weather",
+          "temperature",
+          "political"
+        ],
+        "multiplier": 0.04,
+        "maxTradeSize": 5,
+        "minTradeSize": 0.5,
+        "maxPerMarketNotional": 6
+      },
+      "addedAt": 1776244556917
+    },
+    {
+      "address": "0x0d127f6aa771d1f91f7f9702953bbc98bce45e0c",
+      "enabled": false,
+      "label": "Generalist - Politics, Sports, Entertainment & Culture",
+      "topCategories": [
+        "politics",
+        "sports",
+        "entertainment"
+      ],
+      "aiReason": "Diversified high-conviction trader: 82% win rate on 122 trades across 117 markets (excellent hit rate). Covers US politics, sports (NBA, Masters), entertainment (GTA VI, music), and geopolitics. Lower volume but high selectivity suggests strong edge in macro/event prediction.",
+      "addedBy": "ai",
+      "settings": {
+        "allowKeywords": [
+          "election",
+          "politics",
+          "trump",
+          "nba",
+          "tiger woods",
+          "masters",
+          "gta",
+          "release",
+          "pardon",
+          "big brother",
+          "fed chair"
+        ],
+        "blockKeywords": [
+          "crypto",
+          "bitcoin",
+          "weather",
+          "micro-prediction",
+          "temperature",
+          "price prediction"
+        ],
+        "multiplier": 0.05,
+        "maxTradeSize": 7,
+        "minTradeSize": 0.5,
+        "maxPerMarketNotional": 16
+      },
+      "addedAt": 1776244556917
+    },
+    {
+      "address": "0x2663daca3cecf3767ca1c3b126002a8578a8ed1f",
+      "enabled": false,
+      "label": "Politics & Sports Specialist",
+      "topCategories": [
+        "politics",
+        "sports"
+      ],
+      "aiReason": "77/100 score, 56% win rate, +$5,888 PnL. Clear expertise in 2028 US elections and 2026 FIFA World Cup. High conviction (59 markets, 937 trades). Strong profitability signal.",
+      "addedBy": "ai",
+      "settings": {
+        "allowKeywords": [
+          "election",
+          "presidential",
+          "fifa world cup",
+          "nomination",
+          "trump",
+          "senate",
+          "congress",
+          "primary",
+          "world cup",
+          "champions league",
+          "copa",
+          "vs",
+          "vs.",
+          "o/u",
+          "win on",
+          "draw",
+          "spread",
+          "match"
+        ],
+        "blockKeywords": [
+          "bitcoin",
+          "ethereum",
+          "crypto",
+          "price dip"
+        ],
+        "multiplier": 0.05,
+        "maxTradeSize": 6,
+        "minTradeSize": 0.5,
+        "maxPerMarketNotional": 12
+      },
+      "addedAt": 1776244556917
+    },
+    {
+      "address": "0x82def84cdf9312e6627f7b8906f97b79c53b1337",
+      "enabled": false,
+      "label": "Sports Specialist (Tennis & Football)",
+      "topCategories": [
+        "sports"
+      ],
+      "aiReason": "77/100 score, 63% win rate, +$21,556 PnL. Specialist in tennis (ATP Busan) and football markets. 2,444 trades across 756 markets shows disciplined focus.",
+      "addedBy": "ai",
+      "settings": {
+        "allowKeywords": [
+          "vs",
+          "vs.",
+          "o/u",
+          "win on",
+          "draw",
+          "spread",
+          "match",
+          "tennis",
+          "atp",
+          "wta",
+          "football",
+          "soccer",
+          "nhl",
+          "nba",
+          "mlb",
+          "nfl",
+          "hockey",
+          "baseball",
+          "busan",
+          "wuning",
+          "santa cruz",
+          "tallahassee"
+        ],
+        "blockKeywords": [
+          "bitcoin",
+          "ethereum",
+          "crypto",
+          "temperature",
+          "weather"
+        ],
+        "multiplier": 0.05,
+        "maxTradeSize": 7,
+        "minTradeSize": 0.5,
+        "maxPerMarketNotional": 14
+      },
+      "addedAt": 1776244556917
+    },
+    {
+      "address": "0x69af844d4fbacebfc1c4124b0978801db3600a19",
+      "enabled": false,
+      "label": "Politics, Sports & Entertainment Generalist",
+      "topCategories": [
+        "politics",
+        "sports",
+        "entertainment"
+      ],
+      "aiReason": "76/100 score, 75% win rate, +$795 PnL. Diverse portfolio: Brazilian elections, NBA/MLB, Eurovision, geopolitics. However, ~15% crypto exposure. Acceptable with crypto blocking.",
+      "addedBy": "ai",
+      "settings": {
+        "allowKeywords": [
+          "election",
+          "presidential",
+          "world series",
+          "nba",
+          "nhl",
+          "eurovision",
+          "strait",
+          "nato",
+          "russia",
+          "ukraine",
+          "trump",
+          "blockade",
+          "military",
+          "fed",
+          "powell",
+          "rate cut",
+          "rate hike",
+          "interest rate",
+          "jerome",
+          "mls",
+          "mls cup",
+          "fc win",
+          "vs",
+          "vs.",
+          "o/u",
+          "win on",
+          "draw",
+          "spread",
+          "match",
+          "mlb",
+          "nfl",
+          "openai",
+          "ai model",
+          "claude",
+          "nobel",
+          "oscar",
+          "grammy",
+          "big brother"
+        ],
+        "blockKeywords": [
+          "bitcoin",
+          "ethereum",
+          "crypto",
+          "dip to",
+          "reach $"
+        ],
+        "multiplier": 0.05,
+        "maxTradeSize": 5,
+        "minTradeSize": 0.5,
+        "maxPerMarketNotional": 10
+      },
+      "addedAt": 1776244556918
+    }
+  ]
+}
