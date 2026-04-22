@@ -122,6 +122,13 @@ export class PolymarketCopyBot {
     console.log(`   Token ID: ${trade.tokenId}`);
     console.log('='.repeat(50));
 
+    // Skip very speculative entries (price < 0.20 — longshots almost always go to zero)
+    if (trade.price < 0.20) {
+      console.log(`⏭️  Skipping trade — entry price ${trade.price.toFixed(3)} too speculative (<0.20)`);
+      this.onTradeFailed?.(trade, `entry price ${trade.price.toFixed(3)} too speculative`);
+      return;
+    }
+
     // Per-target market keyword filter
     const filterResult = this.checkMarketFilter(trade.market, target);
     if (!filterResult.allowed) {
@@ -269,9 +276,13 @@ export class PolymarketCopyBot {
       if (curPrice >= 0.99 || curPrice <= 0.01) continue;
 
       const posState = this.positions.getPosition(tokenId);
-      if (!posState || posState.shares <= 0) continue;
+      // Use API avgPrice as fallback for positions not tracked by the bot
+      const apiAvgPrice = parseFloat(p.avgPrice ?? 0);
+      const entryPrice = (posState?.avgPrice > 0) ? posState.avgPrice : apiAvgPrice;
+      const shares = (posState?.shares ?? 0) > 0 ? posState!.shares : parseFloat(p.size ?? p.quantity ?? 0);
 
-      const entryPrice = posState.avgPrice;
+      if (shares <= 0) continue;
+      if (entryPrice <= 0) continue;
       if (entryPrice <= MIN_ENTRY) continue;
       if (curPrice >= entryPrice * THRESHOLD) continue;
 
@@ -282,10 +293,11 @@ export class PolymarketCopyBot {
 
       const label = (p.title ?? tokenId).slice(0, 60);
       const lossPct = ((1 - curPrice / entryPrice) * 100).toFixed(0);
+      const source = posState?.avgPrice > 0 ? 'bot' : 'api';
       console.log(`⚡ Stop-loss: ${label}`);
-      console.log(`   Entry ${entryPrice.toFixed(3)} → Current ${curPrice.toFixed(3)} (-${lossPct}%)`);
+      console.log(`   Entry ${entryPrice.toFixed(3)} (${source}) → Current ${curPrice.toFixed(3)} (-${lossPct}%)`);
       try {
-        await this.executor.exitPosition(tokenId, posState.shares);
+        await this.executor.exitPosition(tokenId, shares);
         this.cutPositions.add(tokenId);
         triggered++;
         console.log(`✅ Stop-loss executed`);
