@@ -542,7 +542,9 @@ export class TradeExecutor {
       const usdc = new ethers.Contract(config.contracts.usdc, this.ERC20_ABI, this.wallet);
       const ctf = new ethers.Contract(config.contracts.ctf, this.CTF_ABI, this.wallet);
       const decimals = await usdc.decimals();
-      const required = ethers.utils.parseUnits(requiredAmount.toString(), decimals);
+      // Floor to token decimals — parseUnits throws if fractional digits exceed decimals
+      const safeAmount = (Math.floor(requiredAmount * 1e6) / 1e6).toFixed(6);
+      const required = ethers.utils.parseUnits(safeAmount, decimals);
 
       const balance = await usdc.balanceOf(this.wallet.address);
       if (balance.lt(required)) {
