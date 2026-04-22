@@ -256,7 +256,7 @@ export class TradeExecutor {
     tokenId: string,
     side: 'BUY' | 'SELL',
     sourcePrice: number,
-    maxDriftPct: number = 0.15,
+    maxDriftPct: number = 0.30,
   ): Promise<{ drifted: boolean; currentPrice: number; driftPct: number }> {
     const orderbook = await this.clobClient.getOrderBook(tokenId);
     const currentPrice = this.getBestPrice(orderbook, side, sourcePrice);
