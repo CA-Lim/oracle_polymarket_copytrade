@@ -171,7 +171,7 @@ export class PolymarketCopyBot {
       const drift = await this.executor.checkPriceDrift(trade.tokenId, trade.side, trade.price);
       if (drift.drifted) {
         console.log(`⏭️  Skipping trade — price drifted ${(drift.driftPct * 100).toFixed(1)}% (trader bought: ${trade.price.toFixed(3)} → market now: ${drift.currentPrice.toFixed(3)})`);
-        this.onTradeFailed?.(trade, `price drifted ${(drift.driftPct * 100).toFixed(1)}%`);
+        this.onTradeFailed?.(trade, `price drifted ${(drift.driftPct * 100).toFixed(1)}% (trader: ${trade.price.toFixed(3)} → now: ${drift.currentPrice.toFixed(3)})`);
         return;
       }
 

@@ -313,7 +313,7 @@
               <th class="px-4 py-2.5 text-right font-medium">Entry Cost</th>
               <th class="px-4 py-2.5 text-right font-medium">Price</th>
               <th class="px-4 py-2.5 text-right font-medium">Shares</th>
-              <th class="px-4 py-2.5 text-center font-medium">Result</th>
+              <th class="px-4 py-2.5 text-left font-medium">Result</th>
             </tr>
           </thead>
           <tbody>
@@ -352,9 +352,12 @@
                 <td class="px-4 py-2.5 text-right text-gray-400 font-mono" x-text="'$' + Number(t.price).toFixed(3)"></td>
                 <td class="px-4 py-2.5 text-right text-gray-400 font-mono"
                     x-text="t.status === 'filled' ? Number(t.shares).toFixed(3) : '—'"></td>
-                <td class="px-4 py-2.5 text-center">
-                  <span x-show="t.status === 'filled'" class="text-green-400 text-base">✓</span>
-                  <span x-show="t.status === 'failed'" class="text-red-400 text-base" :title="t.failReason">✕</span>
+                <td class="px-4 py-2.5">
+                  <span x-show="t.status === 'filled'" class="text-green-400 text-base flex justify-center">✓</span>
+                  <div x-show="t.status === 'failed'" class="flex items-start gap-1.5">
+                    <span class="text-red-400 shrink-0 leading-tight">✕</span>
+                    <span class="text-xs text-gray-400 leading-tight" :title="t.failReason" x-text="t.failReason"></span>
+                  </div>
                 </td>
               </tr>
             </template>
