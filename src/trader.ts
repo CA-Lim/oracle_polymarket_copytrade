@@ -258,19 +258,34 @@ export class TradeExecutor {
     sourcePrice: number,
     maxDriftPct: number = 0.30,
   ): Promise<{ drifted: boolean; currentPrice: number; driftPct: number }> {
-    const orderbook = await this.clobClient.getOrderBook(tokenId);
-    const currentPrice = this.getBestPrice(orderbook, side, sourcePrice);
+    // Use CLOB midpoint — much more reliable than best ask which can sit at 0.99
+    // in thin markets even when the true price is 0.40
+    const currentPrice = await this.getMidpoint(tokenId, sourcePrice);
     const driftPct = (currentPrice - sourcePrice) / sourcePrice;
     // For BUY: positive drift means price rose (worse entry). For SELL: negative drift means price fell.
     const adverseDrift = side === 'BUY' ? driftPct : -driftPct;
     return { drifted: adverseDrift > maxDriftPct, currentPrice, driftPct };
   }
 
-  private getBestPrice(orderbook: any, side: 'BUY' | 'SELL', fallback: number): number {
-    if (side === 'BUY') {
-      return Number(orderbook.asks[0]?.price || fallback);
-    }
-    return Number(orderbook.bids[0]?.price || fallback);
+  private async getMidpoint(tokenId: string, fallback: number): Promise<number> {
+    try {
+      const res = await fetch(`https://clob.polymarket.com/midpoint?token_id=${tokenId}`);
+      if (res.ok) {
+        const data = await res.json();
+        const mid = parseFloat(data.mid);
+        if (mid > 0 && mid < 1) return mid;
+      }
+    } catch {}
+    // Fallback: derive mid from orderbook bid/ask spread
+    try {
+      const orderbook = await this.clobClient.getOrderBook(tokenId);
+      const bestAsk = parseFloat(orderbook.asks[0]?.price || '0');
+      const bestBid = parseFloat(orderbook.bids[0]?.price || '0');
+      if (bestAsk > 0 && bestBid > 0) return (bestAsk + bestBid) / 2;
+      if (bestBid > 0) return bestBid;
+      if (bestAsk > 0) return bestAsk;
+    } catch {}
+    return fallback;
   }
 
   getWalletAddress(): string {
