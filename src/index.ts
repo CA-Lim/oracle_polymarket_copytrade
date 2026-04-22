@@ -122,6 +122,13 @@ export class PolymarketCopyBot {
     console.log(`   Token ID: ${trade.tokenId}`);
     console.log('='.repeat(50));
 
+    // Skip re-entry into markets where stop-loss already fired this session
+    if (this.cutPositions.has(trade.tokenId)) {
+      console.log(`⏭️  Skipping trade — stop-loss already triggered for this token this session`);
+      this.onTradeFailed?.(trade, 'stop-loss cut this session');
+      return;
+    }
+
     // Skip very speculative entries (price < 0.20 — longshots almost always go to zero)
     if (trade.price < 0.20) {
       console.log(`⏭️  Skipping trade — entry price ${trade.price.toFixed(3)} too speculative (<0.20)`);
