@@ -144,6 +144,13 @@ export class PolymarketCopyBot {
       return;
     }
 
+    // Skip late-stage entries (price > 0.80 — almost no upside, full downside risk)
+    if (trade.price > 0.80) {
+      console.log(`⏭️  Skipping trade — entry price ${trade.price.toFixed(3)} too late (>0.80, risk/reward unfavorable)`);
+      this.onTradeFailed?.(trade, `entry price ${trade.price.toFixed(3)} too late (>0.80)`);
+      return;
+    }
+
     // Per-target market keyword filter
     const filterResult = this.checkMarketFilter(trade.market, target);
     if (!filterResult.allowed) {
@@ -262,7 +269,7 @@ export class PolymarketCopyBot {
   }
 
   private async checkStopLoss(): Promise<void> {
-    const THRESHOLD = 0.38;
+    const THRESHOLD = 0.65;  // exit when curPrice drops to <65% of entry (35% loss)
     const MIN_ENTRY = 0.30;
     const walletAddress = this.executor.getWalletAddress();
 

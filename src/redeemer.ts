@@ -1,7 +1,7 @@
 import { ethers } from 'ethers';
 import { config } from './config.js';
 
-const CTF_ABI = [
+const REDEEM_ABI = [
   'function redeemPositions(address collateralToken, bytes32 parentCollectionId, bytes32 conditionId, uint256[] indexSets) external',
 ];
 const ERC20_ABI = ['function balanceOf(address) view returns (uint256)'];
@@ -35,6 +35,15 @@ export class AutoRedeemer {
   }
 
   async checkAndRedeem(): Promise<void> {
+    // Skip if there are pending (unconfirmed) txs — submitting now would stack
+    // a redeem behind stuck trade txs (or vice-versa) and block the nonce queue.
+    const confirmed = await this.provider.getTransactionCount(this.wallet.address, 'latest');
+    const pending   = await this.provider.getTransactionCount(this.wallet.address, 'pending');
+    if (pending > confirmed) {
+      console.log(`♻️  Auto-redeem: skipping — ${pending - confirmed} pending tx(s) in mempool`);
+      return;
+    }
+
     let positions: any[];
     try {
       const res = await fetch(
@@ -66,8 +75,9 @@ export class AutoRedeemer {
 
     console.log(`♻️  Auto-redeem: ${toRedeem.length} winning condition(s) to redeem`);
 
-    const ctf = new ethers.Contract(config.contracts.ctf, CTF_ABI, this.wallet);
-    const usdc = new ethers.Contract(config.contracts.usdc, ERC20_ABI, this.provider);
+    const negRisk = new ethers.Contract(config.contracts.negRiskAdapter, REDEEM_ABI, this.wallet);
+    const ctf     = new ethers.Contract(config.contracts.ctf,            REDEEM_ABI, this.wallet);
+    const usdc    = new ethers.Contract(config.contracts.usdc, ERC20_ABI, this.provider);
     const balBefore = await usdc.balanceOf(this.wallet.address);
 
     for (const conditionId of toRedeem) {
@@ -76,13 +86,12 @@ export class AutoRedeemer {
       try {
         const gasOverrides = await this.getGasOverrides();
         console.log(`   Redeeming: ${label}`);
-        const tx = await ctf.redeemPositions(
-          config.contracts.usdc,
-          ethers.constants.HashZero,
-          conditionId,
-          [1, 2],
-          gasOverrides,
-        );
+        let tx: ethers.ContractTransaction;
+        try {
+          tx = await negRisk.redeemPositions(config.contracts.usdc, ethers.constants.HashZero, conditionId, [1, 2], gasOverrides);
+        } catch {
+          tx = await ctf.redeemPositions(config.contracts.usdc, ethers.constants.HashZero, conditionId, [1, 2], gasOverrides);
+        }
         console.log(`   ⏳ Tx: ${tx.hash}`);
         await tx.wait();
         this.redeemed.add(conditionId);
