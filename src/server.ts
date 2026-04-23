@@ -951,35 +951,49 @@ async function autoRedeem() {
   const redeemable = positions.filter((p: any) => p.redeemable && !redeemedConditions.has(p.conditionId));
   if (redeemable.length === 0) return;
 
-  const CTF_ABI  = ['function redeemPositions(address collateralToken, bytes32 parentCollectionId, bytes32 conditionId, uint256[] indexSets) external'];
-  const ERC20_B  = ['function balanceOf(address) view returns (uint256)'];
-  const provider = new ethers.providers.JsonRpcProvider(config.rpcUrl);
-  const wallet   = new ethers.Wallet(config.privateKey, provider);
-  const ctf      = new ethers.Contract(config.contracts.ctf, CTF_ABI, wallet);
-  const usdcC    = new ethers.Contract(config.contracts.usdc, ERC20_B, provider);
+  const REDEEM_ABI = ['function redeemPositions(address collateralToken, bytes32 parentCollectionId, bytes32 conditionId, uint256[] indexSets) external'];
+  const ERC20_B    = ['function balanceOf(address) view returns (uint256)'];
+  const provider   = new ethers.providers.JsonRpcProvider(config.rpcUrl);
+  const wallet     = new ethers.Wallet(config.privateKey, provider);
+  const negRisk    = new ethers.Contract(config.contracts.negRiskAdapter, REDEEM_ABI, wallet);
+  const ctf        = new ethers.Contract(config.contracts.ctf, REDEEM_ABI, wallet);
+  const usdcC      = new ethers.Contract(config.contracts.usdc, ERC20_B, provider);
+
+  // Skip if pending txs — avoid nonce queue pile-up
+  const confirmed = await provider.getTransactionCount(wallet.address, 'latest');
+  const pending   = await provider.getTransactionCount(wallet.address, 'pending');
+  if (pending > confirmed) {
+    console.log(`🔄 Auto-redeem: skipping — ${pending - confirmed} pending tx(s)`);
+    return;
+  }
 
   for (const pos of redeemable) {
+    if (parseFloat(pos.curPrice ?? 0) < 0.99) continue; // skip losing positions
     try {
-      redeemedConditions.add(pos.conditionId); // mark early to prevent double-trigger
-      const before   = await usdcC.balanceOf(wallet.address);
-      const feeData  = await provider.getFeeData();
-      const minPri   = ethers.utils.parseUnits('30', 'gwei');
+      redeemedConditions.add(pos.conditionId);
+      const before  = await usdcC.balanceOf(wallet.address);
+      const feeData = await provider.getFeeData();
+      const minPri  = ethers.utils.parseUnits('50', 'gwei');
       const priority = (feeData.maxPriorityFeePerGas ?? minPri).lt(minPri) ? minPri : feeData.maxPriorityFeePerGas!;
-      const maxFee   = (feeData.maxFeePerGas ?? ethers.utils.parseUnits('300', 'gwei')).mul(12).div(10);
-      const indexSet = Math.pow(2, pos.outcomeIndex ?? 0);
+      const block   = await provider.getBlock('latest');
+      const baseFee = block.baseFeePerGas ?? ethers.utils.parseUnits('100', 'gwei');
+      const maxFee  = baseFee.mul(2).add(priority);
+      const gasOverrides = { maxPriorityFeePerGas: priority, maxFeePerGas: maxFee };
 
       console.log(`🔄 Auto-redeeming: ${pos.title} (${pos.outcome})`);
-      const tx = await ctf.redeemPositions(
-        config.contracts.usdc, ethers.constants.HashZero, pos.conditionId, [indexSet],
-        { maxPriorityFeePerGas: priority, maxFeePerGas: maxFee }
-      );
+      let tx: ethers.ContractTransaction;
+      try {
+        tx = await negRisk.redeemPositions(config.contracts.usdc, ethers.constants.HashZero, pos.conditionId, [1, 2], gasOverrides);
+      } catch {
+        tx = await ctf.redeemPositions(config.contracts.usdc, ethers.constants.HashZero, pos.conditionId, [1, 2], gasOverrides);
+      }
       await tx.wait();
       const after    = await usdcC.balanceOf(wallet.address);
       const received = parseFloat(ethers.utils.formatUnits(after.sub(before), 6));
       console.log(`✅ Auto-redeemed ${pos.title}: +$${received.toFixed(2)} USDC.e (tx: ${tx.hash})`);
       broadcast({ type: 'redeemed', market: pos.title, received, txHash: tx.hash });
     } catch (e: any) {
-      redeemedConditions.delete(pos.conditionId); // allow retry on failure
+      redeemedConditions.delete(pos.conditionId);
       console.error(`❌ Auto-redeem failed for ${pos.title}: ${e.message}`);
     }
   }
