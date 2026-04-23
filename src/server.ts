@@ -948,15 +948,22 @@ wss.on('connection', async (ws, req) => {
 // ── Auto-redeem background poller ────────────────────────────────────────────
 async function autoRedeem() {
   const positions = await getPositions();
-  const redeemable = positions.filter((p: any) => p.redeemable && !redeemedConditions.has(p.conditionId));
-  if (redeemable.length === 0) return;
+  const winning = positions.filter(
+    (p: any) => p.redeemable && parseFloat(p.curPrice ?? 0) >= 0.99 && !redeemedConditions.has(p.conditionId)
+  );
+  if (winning.length === 0) return;
 
-  const REDEEM_ABI = ['function redeemPositions(address collateralToken, bytes32 parentCollectionId, bytes32 conditionId, uint256[] indexSets) external'];
+  const NEG_RISK_ABI = ['function redeemPositions(bytes32 _conditionId, uint256[] calldata _amounts) public'];
+  const CTF_ABI      = [
+    'function redeemPositions(address collateralToken, bytes32 parentCollectionId, bytes32 conditionId, uint256[] indexSets) external',
+    'function balanceOf(address account, uint256 id) external view returns (uint256)',
+  ];
   const ERC20_B    = ['function balanceOf(address) view returns (uint256)'];
   const provider   = new ethers.providers.JsonRpcProvider(config.rpcUrl);
   const wallet     = new ethers.Wallet(config.privateKey, provider);
-  const negRisk    = new ethers.Contract(config.contracts.negRiskAdapter, REDEEM_ABI, wallet);
-  const ctf        = new ethers.Contract(config.contracts.ctf, REDEEM_ABI, wallet);
+  const negRisk    = new ethers.Contract(config.contracts.negRiskAdapter, NEG_RISK_ABI, wallet);
+  const ctf        = new ethers.Contract(config.contracts.ctf, CTF_ABI, wallet);
+  const ctfRead    = new ethers.Contract(config.contracts.ctf, CTF_ABI, provider);
   const usdcC      = new ethers.Contract(config.contracts.usdc, ERC20_B, provider);
 
   // Skip if pending txs — avoid nonce queue pile-up
@@ -967,11 +974,19 @@ async function autoRedeem() {
     return;
   }
 
-  for (const pos of redeemable) {
-    if (parseFloat(pos.curPrice ?? 0) < 0.99) continue; // skip losing positions
+  // Group by conditionId — one redeemPositions call per condition
+  const byCondition = new Map<string, any[]>();
+  for (const p of winning) {
+    if (!byCondition.has(p.conditionId)) byCondition.set(p.conditionId, []);
+    byCondition.get(p.conditionId)!.push(p);
+  }
+
+  for (const [conditionId, posGroup] of byCondition) {
+    const label = (posGroup[0]?.title ?? conditionId).slice(0, 65);
     try {
-      redeemedConditions.add(pos.conditionId);
-      const before  = await usdcC.balanceOf(wallet.address);
+      redeemedConditions.add(conditionId);
+      const before = await usdcC.balanceOf(wallet.address);
+
       const feeData = await provider.getFeeData();
       const minPri  = ethers.utils.parseUnits('50', 'gwei');
       const priority = (feeData.maxPriorityFeePerGas ?? minPri).lt(minPri) ? minPri : feeData.maxPriorityFeePerGas!;
@@ -980,24 +995,43 @@ async function autoRedeem() {
       const maxFee  = baseFee.mul(2).add(priority);
       const gasOverrides = { maxPriorityFeePerGas: priority, maxFeePerGas: maxFee };
 
-      console.log(`🔄 Auto-redeeming: ${pos.title} (${pos.outcome})`);
-      let tx: ethers.ContractTransaction;
-      try {
-        tx = await negRisk.redeemPositions(config.contracts.usdc, ethers.constants.HashZero, pos.conditionId, [1, 2], gasOverrides);
-      } catch {
-        tx = await ctf.redeemPositions(config.contracts.usdc, ethers.constants.HashZero, pos.conditionId, [1, 2], gasOverrides);
+      // Build amounts[] from actual on-chain CTF balances
+      const amounts: ethers.BigNumber[] = [];
+      for (const p of posGroup) {
+        const outcomeIdx = p.outcomeIndex ?? 0;
+        while (amounts.length <= outcomeIdx) amounts.push(ethers.BigNumber.from(0));
+        if (p.asset) {
+          const bal = await ctfRead.balanceOf(wallet.address, p.asset);
+          amounts[outcomeIdx] = bal;
+        }
       }
+
+      console.log(`🔄 Auto-redeeming: ${label}`);
+      let tx: ethers.ContractTransaction;
+      const isNegRisk   = posGroup.some((p: any) => p.negativeRisk);
+      const hasBalance  = amounts.some(a => !a.isZero());
+
+      if (hasBalance && isNegRisk) {
+        try {
+          tx = await negRisk.redeemPositions(conditionId, amounts, gasOverrides);
+        } catch {
+          tx = await ctf.redeemPositions(config.contracts.usdc, ethers.constants.HashZero, conditionId, [1, 2], gasOverrides);
+        }
+      } else {
+        tx = await ctf.redeemPositions(config.contracts.usdc, ethers.constants.HashZero, conditionId, [1, 2], gasOverrides);
+      }
+
       await tx.wait();
       const after    = await usdcC.balanceOf(wallet.address);
       const received = parseFloat(ethers.utils.formatUnits(after.sub(before), 6));
-      console.log(`✅ Auto-redeemed ${pos.title}: +$${received.toFixed(2)} USDC.e (tx: ${tx.hash})`);
-      broadcast({ type: 'redeemed', market: pos.title, received, txHash: tx.hash });
+      console.log(`✅ Auto-redeemed ${label}: +$${received.toFixed(2)} USDC.e (tx: ${tx.hash})`);
+      broadcast({ type: 'redeemed', market: posGroup[0]?.title ?? label, received, txHash: tx.hash });
     } catch (e: any) {
-      redeemedConditions.delete(pos.conditionId);
-      console.error(`❌ Auto-redeem failed for ${pos.title}: ${e.message}`);
+      redeemedConditions.delete(conditionId);
+      console.error(`❌ Auto-redeem failed for ${label}: ${e.message}`);
     }
   }
-  if (redeemable.length > 0) broadcastSnapshot();
+  if (winning.length > 0) broadcastSnapshot();
 }
 
 setInterval(autoRedeem, 30_000); // check every 30s

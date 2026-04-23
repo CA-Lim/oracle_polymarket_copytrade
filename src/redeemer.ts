@@ -1,8 +1,12 @@
 import { ethers } from 'ethers';
 import { config } from './config.js';
 
-const REDEEM_ABI = [
+const NEG_RISK_ABI = [
+  'function redeemPositions(bytes32 _conditionId, uint256[] calldata _amounts) public',
+];
+const CTF_ABI = [
   'function redeemPositions(address collateralToken, bytes32 parentCollectionId, bytes32 conditionId, uint256[] indexSets) external',
+  'function balanceOf(address account, uint256 id) external view returns (uint256)',
 ];
 const ERC20_ABI = ['function balanceOf(address) view returns (uint256)'];
 
@@ -56,42 +60,64 @@ export class AutoRedeemer {
       return;
     }
 
-    // Collect conditionIds that have at least one winning token (curPrice ≈ $1)
-    // We call redeemPositions with [1, 2] (both outcome slots) — the CTF contract
-    // pays out winning tokens and is a no-op for zero-balance losing tokens.
-    const winningConditions = new Set<string>();
-    for (const p of positions) {
-      if (p.redeemable === true && parseFloat(p.curPrice ?? 0) >= 0.99) {
-        winningConditions.add(p.conditionId);
-      }
-    }
+    // Filter winning redeemable positions not yet redeemed this session
+    const winning = positions.filter(
+      p => p.redeemable === true
+        && parseFloat(p.curPrice ?? 0) >= 0.99
+        && !this.redeemed.has(p.conditionId)
+    );
 
-    const toRedeem = [...winningConditions].filter(id => !this.redeemed.has(id));
-
-    if (!toRedeem.length) {
+    if (!winning.length) {
       console.log('♻️  Auto-redeem: nothing to redeem');
       return;
     }
 
-    console.log(`♻️  Auto-redeem: ${toRedeem.length} winning condition(s) to redeem`);
+    // Group by conditionId — one redeemPositions call per condition
+    const byCondition = new Map<string, any[]>();
+    for (const p of winning) {
+      if (!byCondition.has(p.conditionId)) byCondition.set(p.conditionId, []);
+      byCondition.get(p.conditionId)!.push(p);
+    }
 
-    const negRisk = new ethers.Contract(config.contracts.negRiskAdapter, REDEEM_ABI, this.wallet);
-    const ctf     = new ethers.Contract(config.contracts.ctf,            REDEEM_ABI, this.wallet);
-    const usdc    = new ethers.Contract(config.contracts.usdc, ERC20_ABI, this.provider);
+    console.log(`♻️  Auto-redeem: ${byCondition.size} winning condition(s) to redeem`);
+
+    const negRisk  = new ethers.Contract(config.contracts.negRiskAdapter, NEG_RISK_ABI, this.wallet);
+    const ctf      = new ethers.Contract(config.contracts.ctf, CTF_ABI, this.wallet);
+    const ctfRead  = new ethers.Contract(config.contracts.ctf, CTF_ABI, this.provider);
+    const usdc     = new ethers.Contract(config.contracts.usdc, ERC20_ABI, this.provider);
     const balBefore = await usdc.balanceOf(this.wallet.address);
 
-    for (const conditionId of toRedeem) {
-      const sample = positions.find(p => p.conditionId === conditionId);
-      const label = (sample?.title ?? conditionId).slice(0, 65);
+    for (const [conditionId, posGroup] of byCondition) {
+      const label = (posGroup[0]?.title ?? conditionId).slice(0, 65);
       try {
         const gasOverrides = await this.getGasOverrides();
         console.log(`   Redeeming: ${label}`);
+
+        // Build amounts[] from actual on-chain CTF balances
+        const amounts: ethers.BigNumber[] = [];
+        for (const p of posGroup) {
+          const outcomeIdx = p.outcomeIndex ?? 0;
+          while (amounts.length <= outcomeIdx) amounts.push(ethers.BigNumber.from(0));
+          if (p.asset) {
+            const bal = await ctfRead.balanceOf(this.wallet.address, p.asset);
+            amounts[outcomeIdx] = bal;
+          }
+        }
+
         let tx: ethers.ContractTransaction;
-        try {
-          tx = await negRisk.redeemPositions(config.contracts.usdc, ethers.constants.HashZero, conditionId, [1, 2], gasOverrides);
-        } catch {
+        const hasBalance = amounts.some(a => !a.isZero());
+
+        if (hasBalance && posGroup.some(p => p.negativeRisk)) {
+          // negRisk positions: use correct 2-arg ABI with real balances
+          try {
+            tx = await negRisk.redeemPositions(conditionId, amounts, gasOverrides);
+          } catch {
+            tx = await ctf.redeemPositions(config.contracts.usdc, ethers.constants.HashZero, conditionId, [1, 2], gasOverrides);
+          }
+        } else {
           tx = await ctf.redeemPositions(config.contracts.usdc, ethers.constants.HashZero, conditionId, [1, 2], gasOverrides);
         }
+
         console.log(`   ⏳ Tx: ${tx.hash}`);
         await tx.wait();
         this.redeemed.add(conditionId);
