@@ -379,7 +379,15 @@ async function getPositions(): Promise<any[]> {
       `https://data-api.polymarket.com/positions?user=${walletAddress}&sizeThreshold=.1`
     );
     const data = await res.json();
-    return Array.isArray(data) ? data : [];
+    if (!Array.isArray(data)) return [];
+    // Hide positions where the market resolved against us (currentValue ≈ $0)
+    // and the position is not redeemable for anything meaningful.
+    return data.filter((p: any) => {
+      const value = parseFloat(p.currentValue ?? p.curPrice ?? 0);
+      if (value < 0.01 && !p.redeemable) return false;   // worthless unresolved
+      if (p.redeemable && parseFloat(p.curPrice ?? 0) < 0.01) return false; // resolved $0
+      return true;
+    });
   } catch {
     return [];
   }
