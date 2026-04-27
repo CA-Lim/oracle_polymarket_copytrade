@@ -12,10 +12,13 @@ const CTF_ADDR  = '0x4D97DCd97eC945f40cF65F87097ACe5EA0476045';
 const USDC_E    = '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174';
 const HASH_ZERO = '0x' + '0'.repeat(64);
 
+// Polymarket CTF formula (differs from Gnosis CTF):
+//   collectionId = keccak256(abi.encodePacked(parentCollectionId, conditionId, indexSet))
+//   positionId   = keccak256(abi.encodePacked(collateralToken, collectionId))
 function localCollId(parent: string, condId: string, indexSet: number): string {
-  const h = BigInt(ethers.utils.keccak256(ethers.utils.solidityPack(['bytes32', 'uint256'], [condId, indexSet])));
-  const p = BigInt(parent);
-  return '0x' + ((h + p) % (2n ** 256n)).toString(16).padStart(64, '0');
+  return ethers.utils.keccak256(
+    ethers.utils.solidityPack(['bytes32', 'bytes32', 'uint256'], [parent, condId, indexSet])
+  );
 }
 function localPosId(collateral: string, collId: string): bigint {
   return BigInt(ethers.utils.keccak256(ethers.utils.solidityPack(['address', 'bytes32'], [collateral, collId])));
