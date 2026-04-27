@@ -99,7 +99,8 @@ export class AutoRedeemer {
           const outcomeIdx = p.outcomeIndex ?? 0;
           while (amounts.length <= outcomeIdx) amounts.push(ethers.BigNumber.from(0));
           if (p.asset) {
-            const bal = await ctfRead.balanceOf(this.wallet.address, p.asset);
+            // Use String() to preserve uint256 precision before BigNumber conversion
+            const bal = await ctfRead.balanceOf(this.wallet.address, ethers.BigNumber.from(String(p.asset)));
             amounts[outcomeIdx] = bal;
           }
         }
@@ -107,7 +108,7 @@ export class AutoRedeemer {
         let tx: ethers.ContractTransaction;
         const hasBalance = amounts.some(a => !a.isZero());
 
-        if (hasBalance && posGroup.some(p => p.negativeRisk)) {
+        if (hasBalance && posGroup.some(p => p.neg_risk)) {
           // negRisk positions: use correct 2-arg ABI with real balances
           try {
             tx = await negRisk.redeemPositions(conditionId, amounts, gasOverrides);
