@@ -66,9 +66,9 @@ async function main() {
   outer:
   for (const oracle of ORACLES) {
     for (let N = 2; N <= 20; N++) {
-      // group CTF conditionId
+      // group CTF conditionId — must use solidityPack (encodePacked) not encode
       const groupCondId = ethers.utils.keccak256(
-        ethers.utils.defaultAbiCoder.encode(['address', 'bytes32', 'uint256'], [oracle, GROUP_QID, N])
+        ethers.utils.solidityPack(['address', 'bytes32', 'uint256'], [oracle, GROUP_QID, N])
       );
       // Check if this group condition is resolved
       const denom = await ctf.payoutDenominator(groupCondId);
