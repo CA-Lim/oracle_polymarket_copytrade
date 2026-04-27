@@ -21,7 +21,7 @@
     },
     {
       "address": "0x204f72f35326db932158cba6adff0b9a1da95e14",
-      "enabled": true,
+      "enabled": false,
       "label": "Sports Specialist - Tennis & Football",
       "topCategories": [
         "sports"
@@ -55,7 +55,7 @@
     },
     {
       "address": "0x507e52ef684ca2dd91f90a9d26d149dd3288beae",
-      "enabled": true,
+      "enabled": false,
       "label": "Multi-Sport & Esports Trader",
       "topCategories": [
         "sports"
@@ -128,7 +128,7 @@
     },
     {
       "address": "0xa509ae942ac8d8bc3f8c5df30cb6ae2c9b13ae46",
-      "enabled": true,
+      "enabled": false,
       "label": "Specialist - Tennis & Niche Sports",
       "topCategories": [
         "sports"
@@ -192,7 +192,7 @@
     },
     {
       "address": "0x0d127f6aa771d1f91f7f9702953bbc98bce45e0c",
-      "enabled": true,
+      "enabled": false,
       "label": "Generalist - Politics, Sports, Entertainment & Culture",
       "topCategories": [
         "politics",
@@ -232,7 +232,7 @@
     },
     {
       "address": "0x2663daca3cecf3767ca1c3b126002a8578a8ed1f",
-      "enabled": true,
+      "enabled": false,
       "label": "Politics & Sports Specialist",
       "topCategories": [
         "politics",
@@ -262,7 +262,7 @@
     },
     {
       "address": "0x82def84cdf9312e6627f7b8906f97b79c53b1337",
-      "enabled": true,
+      "enabled": false,
       "label": "Sports Specialist (Tennis & Football)",
       "topCategories": [
         "sports"
@@ -294,7 +294,7 @@
     },
     {
       "address": "0x69af844d4fbacebfc1c4124b0978801db3600a19",
-      "enabled": true,
+      "enabled": false,
       "label": "Politics, Sports & Entertainment Generalist",
       "topCategories": [
         "politics",
