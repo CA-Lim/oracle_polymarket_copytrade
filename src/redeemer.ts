@@ -1,12 +1,18 @@
 import { ethers } from 'ethers';
 import { config } from './config.js';
 
+const WCOL = '0x3A3BD7bb9528E159577F7C2e685CC81A765002E2';
+
 const NEG_RISK_ABI = [
   'function redeemPositions(bytes32 _conditionId, uint256[] calldata _amounts) public',
+  'function getConditionId(bytes32 questionId) external view returns (bytes32)',
 ];
 const CTF_ABI = [
   'function redeemPositions(address collateralToken, bytes32 parentCollectionId, bytes32 conditionId, uint256[] indexSets) external',
   'function balanceOf(address account, uint256 id) external view returns (uint256)',
+  'function getCollectionId(bytes32 parentCollectionId, bytes32 conditionId, uint256 indexSet) external view returns (bytes32)',
+  'function getPositionId(address collateralToken, bytes32 collectionId) external pure returns (uint256)',
+  'function payoutDenominator(bytes32 conditionId) external view returns (uint256)',
 ];
 const ERC20_ABI = ['function balanceOf(address) view returns (uint256)'];
 
@@ -72,59 +78,88 @@ export class AutoRedeemer {
       return;
     }
 
-    // Group by conditionId — one redeemPositions call per condition
-    const byCondition = new Map<string, any[]>();
-    for (const p of winning) {
-      if (!byCondition.has(p.conditionId)) byCondition.set(p.conditionId, []);
-      byCondition.get(p.conditionId)!.push(p);
-    }
+    console.log(`♻️  Auto-redeem: ${winning.length} winning position(s) to redeem`);
 
-    console.log(`♻️  Auto-redeem: ${byCondition.size} winning condition(s) to redeem`);
-
-    const negRisk  = new ethers.Contract(config.contracts.negRiskAdapter, NEG_RISK_ABI, this.wallet);
-    const ctf      = new ethers.Contract(config.contracts.ctf, CTF_ABI, this.wallet);
-    const ctfRead  = new ethers.Contract(config.contracts.ctf, CTF_ABI, this.provider);
-    const usdc     = new ethers.Contract(config.contracts.usdc, ERC20_ABI, this.provider);
+    const negRisk = new ethers.Contract(config.contracts.negRiskAdapter, NEG_RISK_ABI, this.wallet);
+    const ctf     = new ethers.Contract(config.contracts.ctf, CTF_ABI, this.wallet);
+    const ctfRead = new ethers.Contract(config.contracts.ctf, CTF_ABI, this.provider);
+    const usdc    = new ethers.Contract(config.contracts.usdc, ERC20_ABI, this.provider);
     const balBefore = await usdc.balanceOf(this.wallet.address);
 
-    for (const [conditionId, posGroup] of byCondition) {
-      const label = (posGroup[0]?.title ?? conditionId).slice(0, 65);
+    // Deduplicate by conditionId — one redemption call per condition
+    const seen = new Set<string>();
+    for (const p of winning) {
+      if (seen.has(p.conditionId)) continue;
+      seen.add(p.conditionId);
+
+      const label = (p.title ?? p.conditionId).slice(0, 65);
       try {
         const gasOverrides = await this.getGasOverrides();
         console.log(`   Redeeming: ${label}`);
 
-        // Build amounts[] from actual on-chain CTF balances
-        const amounts: ethers.BigNumber[] = [];
-        for (const p of posGroup) {
-          const outcomeIdx = p.outcomeIndex ?? 0;
-          while (amounts.length <= outcomeIdx) amounts.push(ethers.BigNumber.from(0));
-          if (p.asset) {
-            // Use String() to preserve uint256 precision before BigNumber conversion
-            const bal = await ctfRead.balanceOf(this.wallet.address, ethers.BigNumber.from(String(p.asset)));
-            amounts[outcomeIdx] = bal;
-          }
+        const assetBn  = ethers.BigNumber.from(String(p.asset));
+        const balance  = await ctfRead.balanceOf(this.wallet.address, assetBn);
+        if (balance.isZero()) {
+          console.log(`   ⚠️  On-chain balance is 0, skipping`);
+          this.redeemed.add(p.conditionId);
+          continue;
         }
 
-        let tx: ethers.ContractTransaction;
-        const hasBalance = amounts.some(a => !a.isZero());
+        // Detect which collateral token this position uses by deriving the positionId
+        // on-chain and comparing against the known asset id.
+        const conditionId = p.conditionId as string;
+        const collId      = await ctfRead.getCollectionId(ethers.constants.HashZero, conditionId, 1);
+        const posIdWcol   = (await ctfRead.getPositionId(WCOL, collId)).toBigInt();
+        const posIdUsdc   = (await ctfRead.getPositionId(config.contracts.usdc, collId)).toBigInt();
+        const assetBig    = assetBn.toBigInt();
 
-        if (hasBalance && posGroup.some(p => p.neg_risk)) {
-          // negRisk positions: use correct 2-arg ABI with real balances
+        let tx: ethers.ContractTransaction;
+
+        if (posIdWcol === assetBig) {
+          // negRisk / wcol-backed — redeem via negRiskAdapter
+          console.log(`   Collateral: wcol → negRiskAdapter`);
           try {
-            tx = await negRisk.redeemPositions(conditionId, amounts, gasOverrides);
-          } catch {
-            tx = await ctf.redeemPositions(config.contracts.usdc, ethers.constants.HashZero, conditionId, [1, 2], gasOverrides);
+            tx = await negRisk.redeemPositions(conditionId, [balance, ethers.BigNumber.from(0)], gasOverrides);
+          } catch (e1: any) {
+            console.log(`   negRiskAdapter failed (${e1.reason ?? e1.message.slice(0, 60)}), trying CTF(wcol)...`);
+            tx = await ctf.redeemPositions(WCOL, ethers.constants.HashZero, conditionId, [1], gasOverrides);
           }
+        } else if (posIdUsdc === assetBig) {
+          // Standard binary — redeem via CTF with USDC.e
+          console.log(`   Collateral: usdc → CTF`);
+          tx = await ctf.redeemPositions(config.contracts.usdc, ethers.constants.HashZero, conditionId, [1], gasOverrides);
         } else {
-          tx = await ctf.redeemPositions(config.contracts.usdc, ethers.constants.HashZero, conditionId, [1, 2], gasOverrides);
+          // Nested negRisk: conditionId in API may be the questionId, not the CTF conditionId.
+          // Derive the real conditionId via negRiskAdapter.getConditionId(questionId).
+          console.log(`   No direct match — checking nested negRisk structure...`);
+          let derivedCondId: string | null = null;
+          try {
+            const derived    = await negRisk.getConditionId(conditionId);
+            const dCollId    = await ctfRead.getCollectionId(ethers.constants.HashZero, derived, 1);
+            const dPosIdWcol = (await ctfRead.getPositionId(WCOL, dCollId)).toBigInt();
+            if (dPosIdWcol === assetBig) derivedCondId = derived;
+          } catch { /* ignore */ }
+
+          if (derivedCondId) {
+            console.log(`   Derived conditionId matches — negRiskAdapter`);
+            tx = await negRisk.redeemPositions(derivedCondId, [balance, ethers.BigNumber.from(0)], gasOverrides);
+          } else {
+            // Last resort: try both paths with the original conditionId
+            console.log(`   Falling back to negRiskAdapter with original conditionId...`);
+            try {
+              tx = await negRisk.redeemPositions(conditionId, [balance, ethers.BigNumber.from(0)], gasOverrides);
+            } catch {
+              tx = await ctf.redeemPositions(config.contracts.usdc, ethers.constants.HashZero, conditionId, [1, 2], gasOverrides);
+            }
+          }
         }
 
         console.log(`   ⏳ Tx: ${tx.hash}`);
         await tx.wait();
-        this.redeemed.add(conditionId);
+        this.redeemed.add(p.conditionId);
         console.log(`   ✅ Redeemed`);
       } catch (e: any) {
-        console.error(`   ❌ Failed to redeem "${label}": ${e.message}`);
+        console.error(`   ❌ Failed to redeem "${label}": ${e.reason ?? e.message}`);
       }
     }
 
