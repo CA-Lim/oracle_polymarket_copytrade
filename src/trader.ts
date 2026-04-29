@@ -572,6 +572,7 @@ export class TradeExecutor {
         throw new Error(`not enough balance / allowance (USDC.e allowance to Exchange ${allow} < required ${requiredAmount})`);
       }
 
+      await this.clobClient.updateBalanceAllowance({ asset_type: 'COLLATERAL' });
       const clobBal = await this.clobClient.getBalanceAllowance({ asset_type: 'COLLATERAL' });
       const clobBalance = parseFloat(clobBal?.balance || '0') / 1_000_000;
       if (clobBalance < requiredAmount) {
@@ -722,6 +723,11 @@ export class TradeExecutor {
         console.log(`   ✅ CTF already approved for ${operator.name}`);
       }
     }
+
+    console.log('   Syncing balance/allowance with CLOB...');
+    await this.clobClient.updateBalanceAllowance({ asset_type: 'COLLATERAL' });
+    await this.clobClient.updateBalanceAllowance({ asset_type: 'CONDITIONAL' });
+    console.log('   ✅ CLOB balance/allowance synced');
   }
 
   private async getGasOverrides(): Promise<ethers.providers.TransactionRequest> {
