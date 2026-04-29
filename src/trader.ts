@@ -572,17 +572,6 @@ export class TradeExecutor {
         throw new Error(`not enough balance / allowance (USDC.e allowance to Exchange ${allow} < required ${requiredAmount})`);
       }
 
-      await this.clobClient.updateBalanceAllowance({ asset_type: 'COLLATERAL' });
-      const clobBal = await this.clobClient.getBalanceAllowance({ asset_type: 'COLLATERAL' });
-      const clobBalance = parseFloat(clobBal?.balance || '0') / 1_000_000;
-      if (clobBalance < requiredAmount) {
-        throw new Error(`not enough balance / allowance (CLOB balance ${clobBalance} < required ${requiredAmount})`);
-      }
-      const clobAllowance = clobBal?.allowances?.[exchangeAddress] || '0';
-      if (clobAllowance === '0') {
-        throw new Error(`not enough balance / allowance (CLOB allowance to Exchange is 0)`);
-      }
-
       const approved = await ctf.isApprovedForAll(this.wallet.address, exchangeAddress);
       if (!approved) {
         console.log('   ⚠️  CTF approval missing for exchange (required for SELLs)');
