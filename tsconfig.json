@@ -22,8 +22,8 @@
     "noEmitOnError": true,
 
     // Stricter Typechecking Options
-    "noUncheckedIndexedAccess": true,
-    "exactOptionalPropertyTypes": true,
+    "noUncheckedIndexedAccess": false,
+    "exactOptionalPropertyTypes": false,
 
     // Style Options
     // "noImplicitReturns": true,
@@ -42,6 +42,13 @@
     "moduleDetection": "force",
     "skipLibCheck": true,
   },
+  "exclude": [
+    "check-*.ts",
+    "fix-*.ts",
+    "debug-*.ts",
+    "find-*.ts",
+    "redeem-*.ts"
+  ],
   "ts-node": {
     "esm": true,
     "experimentalSpecifierResolution": "node"

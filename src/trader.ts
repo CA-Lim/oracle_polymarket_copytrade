@@ -1,5 +1,5 @@
 import { ethers } from 'ethers';
-import { ClobClient, Side, OrderType } from '@polymarket/clob-client';
+import { ClobClient, Side, OrderType, AssetType } from '@polymarket/clob-client';
 import { config } from './config.js';
 import type { Trade } from './monitor.js';
 
@@ -633,7 +633,9 @@ export class TradeExecutor {
 
   async getPositions(): Promise<any[]> {
     try {
-      return await this.clobClient.getPositions();
+      const res = await fetch(`https://data-api.polymarket.com/positions?user=${this.wallet.address}&sizeThreshold=.01`);
+      if (!res.ok) return [];
+      return await res.json();
     } catch {
       return [];
     }
@@ -714,8 +716,8 @@ export class TradeExecutor {
     }
 
     console.log('   Syncing balance/allowance with CLOB...');
-    await this.clobClient.updateBalanceAllowance({ asset_type: 'COLLATERAL' });
-    await this.clobClient.updateBalanceAllowance({ asset_type: 'CONDITIONAL' });
+    await this.clobClient.updateBalanceAllowance({ asset_type: AssetType.COLLATERAL });
+    await this.clobClient.updateBalanceAllowance({ asset_type: AssetType.CONDITIONAL });
     console.log('   ✅ CLOB balance/allowance synced');
   }
 

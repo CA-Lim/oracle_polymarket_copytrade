@@ -300,8 +300,8 @@ export class PolymarketCopyBot {
       const posState = this.positions.getPosition(tokenId);
       // Use API avgPrice as fallback for positions not tracked by the bot
       const apiAvgPrice = parseFloat(p.avgPrice ?? 0);
-      const entryPrice = (posState?.avgPrice > 0) ? posState.avgPrice : apiAvgPrice;
-      const shares = (posState?.shares ?? 0) > 0 ? posState!.shares : parseFloat(p.size ?? p.quantity ?? 0);
+      const entryPrice = ((posState?.avgPrice ?? 0) > 0) ? posState!.avgPrice! : apiAvgPrice;
+      const shares = (posState?.shares ?? 0) > 0 ? posState!.shares! : parseFloat(p.size ?? p.quantity ?? 0);
 
       if (shares <= 0) continue;
       if (entryPrice <= 0) continue;
@@ -315,7 +315,7 @@ export class PolymarketCopyBot {
 
       const label = (p.title ?? tokenId).slice(0, 60);
       const lossPct = ((1 - curPrice / entryPrice) * 100).toFixed(0);
-      const source = posState?.avgPrice > 0 ? 'bot' : 'api';
+      const source = (posState?.avgPrice ?? 0) > 0 ? 'bot' : 'api';
       console.log(`⚡ Stop-loss: ${label}`);
       console.log(`   Entry ${entryPrice.toFixed(3)} (${source}) → Current ${curPrice.toFixed(3)} (-${lossPct}%)`);
       try {
