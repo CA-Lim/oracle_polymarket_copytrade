@@ -27,10 +27,6 @@
     <div class="flex items-center gap-3">
       <span class="text-base">🤖</span>
       <span class="font-bold text-white tracking-tight">Oracle P1 - Bot 1</span>
-      <a href="/discovery"
-         class="text-xs px-2.5 py-1 rounded border border-gray-700 text-gray-400 hover:text-white hover:border-gray-500 transition">
-        Trader Discovery →
-      </a>
       <!-- status pill -->
       <span class="text-xs px-2 py-0.5 rounded-full border font-semibold"
             :class="{
@@ -52,8 +48,11 @@
         <span class="text-gray-400">POL</span>
         <span class="text-white font-semibold" x-text="data.balances?.pol ?? '—'"></span>
         <span class="text-gray-600">|</span>
+        <span class="text-gray-400">pUSD</span>
+        <span class="text-green-400 font-semibold" x-text="data.balances?.pusd ? '$' + data.balances.pusd : '—'"></span>
+        <span class="text-gray-600">|</span>
         <span class="text-gray-400">USDC.e</span>
-        <span class="text-green-400 font-semibold" x-text="data.balances?.usdc ? '$' + data.balances.usdc : '—'"></span>
+        <span class="text-gray-300 font-semibold" x-text="data.balances?.usdc ? '$' + data.balances.usdc : '—'"></span>
       </div>
       <!-- ws indicator -->
       <span class="w-2 h-2 rounded-full" :class="wsConnected ? 'bg-green-500' : 'bg-gray-600'" :title="wsConnected ? 'Live' : 'Reconnecting…'"></span>
@@ -92,7 +91,7 @@
        class="mx-6 mt-4 px-4 py-3 rounded-xl border border-red-500/40 bg-red-500/10 text-red-400 text-sm flex items-center gap-2">
     <span>⚠️</span>
     <span>
-      Insufficient balance — <strong x-text="'$' + (data.balances?.usdc ?? '0') + ' USDC.e'"></strong>
+      Insufficient balance — <strong x-text="'$' + (data.balances?.pusd ?? '0') + ' pUSD'"></strong>
       is below the minimum trade size of <strong x-text="'$' + (data.config?.minTradeSize ?? 1)"></strong>.
       Bot has been stopped. Top up your wallet to resume.
     </span>
@@ -175,7 +174,7 @@
     <div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
       <p class="text-xs text-gray-500 mb-1">Total Portfolio</p>
       <p class="text-2xl font-bold text-white" x-text="totalPortfolio"></p>
-      <p class="text-xs text-gray-600 mt-0.5">USDC.e + positions</p>
+      <p class="text-xs text-gray-600 mt-0.5">pUSD + positions</p>
     </div>
 
     <div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
@@ -297,14 +296,7 @@
     <div class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
       <div class="px-4 py-3 border-b border-gray-800 flex items-center justify-between">
         <h2 class="font-semibold text-white">Trade History</h2>
-        <div class="flex items-center gap-3">
-          <span class="text-xs text-gray-500" x-text="(data.recentTrades?.length ?? 0) + ' trades (last 100)'"></span>
-          <button type="button" @click="refreshTrades()"
-                  :disabled="refreshingTrades"
-                  class="text-xs px-2.5 py-1 rounded border cursor-pointer bg-gray-700/50 text-gray-300 border-gray-600 hover:bg-gray-600/60 hover:text-white transition disabled:opacity-40 disabled:cursor-not-allowed">
-            <span x-text="refreshingTrades ? '⏳ Refreshing…' : '🔄 Refresh'"></span>
-          </button>
-        </div>
+        <span class="text-xs text-gray-500" x-text="(data.recentTrades?.length ?? 0) + ' trades (last 100)'"></span>
       </div>
       <div class="overflow-x-auto">
         <table class="w-full">
@@ -454,76 +446,6 @@
       </div>
     </div>
 
-    <!-- ── AI REVIEW ──────────────────────────────────────────────────────── -->
-    <div class="bg-gray-900 border border-gray-800 rounded-xl p-5">
-      <div class="flex items-center justify-between mb-4">
-        <div class="flex items-center gap-3">
-          <h2 class="font-semibold text-white">AI Review</h2>
-          <span class="text-xs px-2 py-0.5 rounded-full border font-semibold"
-                :class="{
-                  'bg-green-500/20 text-green-400 border-green-500/30': data.aiReviewState?.status === 'done',
-                  'bg-yellow-500/20 text-yellow-400 border-yellow-500/30': data.aiReviewState?.status === 'running',
-                  'bg-red-500/20 text-red-400 border-red-500/30': data.aiReviewState?.status === 'error',
-                  'bg-gray-500/20 text-gray-500 border-gray-600/30': !data.aiReviewState?.status || data.aiReviewState?.status === 'idle'
-                }"
-                x-text="({idle:'○ Idle', running:'◌ Running…', done:'✓ Done', error:'✕ Error'})[data.aiReviewState?.status] || '○ Idle'">
-          </span>
-        </div>
-        <button @click="runAiReview()"
-                :disabled="data.aiReviewState?.status === 'running' || aiReviewing"
-                class="text-xs px-3 py-1.5 rounded border border-purple-500/40 text-purple-400 hover:bg-purple-500/10 transition disabled:opacity-40 disabled:cursor-not-allowed">
-          <span x-text="data.aiReviewState?.status === 'running' ? '⏳ Running…' : '🤖 Run AI Review Now'"></span>
-        </button>
-      </div>
-
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-        <div class="bg-gray-800/50 rounded-lg p-3">
-          <p class="text-xs text-gray-500 mb-1">Last Run</p>
-          <p class="text-gray-300" x-text="data.aiReviewState?.finishedAt ? fmtDate(data.aiReviewState.finishedAt) : '—'"></p>
-        </div>
-        <div class="bg-gray-800/50 rounded-lg p-3">
-          <p class="text-xs text-gray-500 mb-1">Next Scheduled</p>
-          <p class="text-gray-300" x-text="data.aiReviewState?.nextRunAt ? fmtDate(data.aiReviewState.nextRunAt) : '—'"></p>
-        </div>
-        <div class="bg-gray-800/50 rounded-lg p-3">
-          <p class="text-xs text-gray-500 mb-1">Last Changes</p>
-          <p class="text-gray-300">
-            <span x-text="(data.aiReviewState?.lastChanges?.addedAddresses?.length ?? 0) + ' added'"></span>
-            <span class="text-gray-600 mx-1">·</span>
-            <span x-text="(data.aiReviewState?.lastChanges?.removedAddresses?.length ?? 0) + ' removed'"></span>
-            <span class="text-gray-600 mx-1">·</span>
-            <span x-text="(data.aiReviewState?.lastChanges?.analyzedCount ?? 0) + ' analyzed'"></span>
-          </p>
-        </div>
-      </div>
-
-      <!-- removed/added detail -->
-      <template x-if="data.aiReviewState?.lastChanges?.removedAddresses?.length">
-        <div class="mt-3 pt-3 border-t border-gray-800">
-          <p class="text-xs text-gray-500 mb-2">Removed last run:</p>
-          <template x-for="r in (data.aiReviewState.lastChanges.removedAddresses ?? [])" :key="r.address">
-            <div class="flex items-start gap-2 text-xs mb-1">
-              <span class="text-red-400 font-mono" x-text="r.address.slice(0,10)+'…'"></span>
-              <span class="text-gray-500" x-text="r.reason"></span>
-            </div>
-          </template>
-        </div>
-      </template>
-      <template x-if="data.aiReviewState?.lastChanges?.addedAddresses?.length">
-        <div class="mt-3 pt-3 border-t border-gray-800">
-          <p class="text-xs text-gray-500 mb-2">Added last run:</p>
-          <template x-for="a in (data.aiReviewState.lastChanges.addedAddresses ?? [])" :key="a.address">
-            <div class="flex items-start gap-2 text-xs mb-1">
-              <span class="text-green-400 font-mono" x-text="a.address.slice(0,10)+'…'"></span>
-              <span class="text-gray-400" x-text="a.label"></span>
-            </div>
-          </template>
-        </div>
-      </template>
-
-      <p x-show="data.aiReviewState?.error" class="mt-3 text-xs text-red-400" x-text="data.aiReviewState?.error"></p>
-    </div>
-
     <!-- ── ADD TARGET MODAL ───────────────────────────────────────────────── -->
     <div x-show="addTargetModal.show" x-transition
          class="fixed inset-0 z-40 flex items-center justify-center bg-black/60"
@@ -637,7 +559,7 @@
           botStatus: 'stopped',
           botError: null,
           walletAddress: '',
-          balances: { pol: '—', usdc: '—' },
+          balances: { pol: '—', usdc: '—', pusd: '—' },
           lowBalance: false,
           positions: [],
           sessionStats: { tradesDetected: 0, tradesCopied: 0, tradesFailed: 0, totalVolume: 0 },
@@ -649,7 +571,6 @@
           },
           config: {},
           copyTargets: [],
-          aiReviewState: null,
         },
         settings: { minTradeSize: 1, maxTradeSize: 5, positionMultiplier: 0.1, maxPerMarketNotional: 0, maxSessionNotional: 0, blockKeywords: '', allowKeywords: '' },
         saved: false,
@@ -660,8 +581,6 @@
         redeeming: {},
         redeemMsg: '',
         exitingPos: {},
-        refreshingTrades: false,
-        aiReviewing: false,
         addTargetModal: { show: false, address: '', saving: false, error: '' },
         toast: { msg: '', ok: true },
         _toastTimer: null,
@@ -684,7 +603,7 @@
         },
         get totalPortfolio() {
           const posValue = (this.data.positions ?? []).reduce((s, p) => s + (p.currentValue || 0), 0);
-          const usdcBal = parseFloat(this.data.balances?.usdc ?? '0') || 0;
+          const usdcBal = parseFloat(this.data.balances?.pusd ?? '0') || 0;
           return '$' + (posValue + usdcBal).toFixed(2);
         },
 
@@ -718,7 +637,7 @@
               this.data.botStatus = msg.botStatus;
               this.data.botError = msg.botError;
             } else if (msg.type === 'redeemed') {
-              this.redeemMsg = `✅ Auto-redeemed: ${msg.market} — +$${Number(msg.received).toFixed(2)} USDC.e`;
+              this.redeemMsg = `✅ Auto-redeemed: ${msg.market} — +$${Number(msg.received).toFixed(2)} pUSD`;
               setTimeout(() => this.redeemMsg = '', 10000);
             }
           };
@@ -785,7 +704,7 @@
             });
             const data = await r.json();
             if (r.ok) {
-              this.redeemMsg = `✅ Redeemed! +$${Number(data.received).toFixed(2)} USDC.e received.`;
+              this.redeemMsg = `✅ Redeemed! +$${Number(data.received).toFixed(2)} pUSD received.`;
             } else {
               this.redeemMsg = `❌ Failed: ${data.error}`;
             }
@@ -817,7 +736,7 @@
             });
             const d = await r.json();
             if (r.ok) {
-              this.showToast(`✅ Exited position: ~$${Number(d.copyNotional ?? 0).toFixed(2)} USDC.e received`, true);
+              this.showToast(`✅ Exited position: ~$${Number(d.copyNotional ?? 0).toFixed(2)} pUSD received`, true);
             } else {
               this.showToast(`❌ Exit failed: ${d.error}`, false);
             }
@@ -828,24 +747,6 @@
           }
         },
 
-        // ── Refresh trade history from Polymarket ─────────────────────────
-        async refreshTrades() {
-          if (this.refreshingTrades) return;
-          this.refreshingTrades = true;
-          try {
-            const r = await fetch('/api/trades/refresh', { method: 'POST' });
-            const d = await r.json();
-            if (r.ok) {
-              this.showToast(`✅ Synced ${d.added} new trade${d.added === 1 ? '' : 's'} from Polymarket (total: ${d.total})`, true);
-            } else {
-              this.showToast(`❌ Refresh failed: ${d.error}`, false);
-            }
-          } catch {
-            this.showToast('❌ Network error', false);
-          } finally {
-            this.refreshingTrades = false;
-          }
-        },
 
         // ── Copy target management ────────────────────────────────────────
         async addTarget() {
@@ -900,25 +801,6 @@
               body: JSON.stringify({ enabled }),
             });
           } catch {}
-        },
-
-        // ── AI Review ─────────────────────────────────────────────────────
-        async runAiReview() {
-          if (this.aiReviewing || this.data.aiReviewState?.status === 'running') return;
-          this.aiReviewing = true;
-          try {
-            const r = await fetch('/api/ai/review', { method: 'POST' });
-            if (r.ok) {
-              this.showToast('🤖 AI review started — check status above', true);
-            } else {
-              const d = await r.json();
-              this.showToast(`❌ ${d.error}`, false);
-            }
-          } catch {
-            this.showToast('❌ Network error', false);
-          } finally {
-            this.aiReviewing = false;
-          }
         },
 
         // ── Helpers ───────────────────────────────────────────────────────

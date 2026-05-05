@@ -7,10 +7,9 @@ import { fileURLToPath } from 'url';
 import { randomUUID } from 'crypto';
 import { PolymarketCopyBot } from './index.js';
 import { config } from './config.js';
-import { TraderDiscovery } from './trader-discovery.js';
 import { copyTargetManager } from './copy-target-manager.js';
-import { ReviewScheduler } from './scheduler.js';
 import { TradeExecutor } from './trader.js';
+import { initDb, initLogger, insertTrade, insertRedeem } from './db.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DASHBOARD_PATH   = path.join(__dirname, '..', 'dashboard', 'index.html');
@@ -112,7 +111,6 @@ async function fetchUsdcTransfers(): Promise<{ deposited: number; withdrawn: num
       (apiKey ? `&apikey=${apiKey}` : '');
     const res = await fetch(url);
     const data = await res.json() as any;
-    console.log(`📊 Polygonscan tokentx page ${page}: status=${data.status} message=${data.message} records=${Array.isArray(data.result) ? data.result.length : 'n/a'}`);
     if (data.status !== '1' || !Array.isArray(data.result) || data.result.length === 0) break;
     allTxs.push(...data.result);
     if (data.result.length < 10000) break; // last page
@@ -141,22 +139,13 @@ async function fetchUsdcTransfers(): Promise<{ deposited: number; withdrawn: num
     const amount = parseFloat(tx.value) / Math.pow(10, decimals);
     if (isNaN(amount)) continue;
 
-    if (swapHashes.has(tx.hash)) {
-      // Both sides of a USDC ↔ USDC.e swap — skip entirely
-      console.log(`  🔄 Swap     $${amount.toFixed(2)} ${tx.tokenSymbol} (excluded — currency conversion)`);
-      continue;
-    }
+    if (swapHashes.has(tx.hash)) continue;
     if (tx.to.toLowerCase() === wallet && !POLYMARKET_CONTRACTS.has(tx.from.toLowerCase())) {
       deposited += amount;
-      console.log(`  ↓ Deposit  +$${amount.toFixed(2)} ${tx.tokenSymbol} from ${tx.from.slice(0,10)}… (tx: ${tx.hash.slice(0,12)}…)`);
-    } else if (tx.to.toLowerCase() === wallet && POLYMARKET_CONTRACTS.has(tx.from.toLowerCase())) {
-      console.log(`  ↩ Redeem   +$${amount.toFixed(2)} ${tx.tokenSymbol} from Polymarket (excluded from deposits)`);
     } else if (tx.from.toLowerCase() === wallet && !POLYMARKET_CONTRACTS.has(tx.to.toLowerCase())) {
       withdrawn += amount;
-      console.log(`  ↑ Withdraw -$${amount.toFixed(2)} ${tx.tokenSymbol} to   ${tx.to.slice(0,10)}… (tx: ${tx.hash.slice(0,12)}…)`);
     }
   }
-  console.log(`📊 Transfers summary: deposited=$${deposited.toFixed(2)} withdrawn=$${withdrawn.toFixed(2)}`);
   return { deposited, withdrawn };
 }
 
@@ -241,6 +230,7 @@ function addToHistory(record: TradeRecord) {
   tradeHistory.unshift(record);
   if (tradeHistory.length > MAX_HISTORY) tradeHistory.pop();
   saveTradeHistory().catch(() => {}); // fire-and-forget
+  insertTrade(record);
 }
 
 // ─── Bot state ───────────────────────────────────────────────────────────────
@@ -353,23 +343,25 @@ const FALLBACK_RPCS = [
   'https://polygon.llamarpc.com',
 ];
 
-async function getBalances(): Promise<{ pol: string; usdc: string }> {
+async function getBalances(): Promise<{ pol: string; usdc: string; pusd: string }> {
   for (const rpc of FALLBACK_RPCS) {
     try {
       const provider = new ethers.providers.JsonRpcProvider(rpc);
-      const [polBal, usdcBal] = await Promise.all([
+      const [polBal, usdcBal, pusdBal] = await Promise.all([
         provider.getBalance(walletAddress),
         new ethers.Contract(config.contracts.usdc, ERC20_ABI, provider).balanceOf(walletAddress),
+        new ethers.Contract(config.contracts.pusd, ERC20_ABI, provider).balanceOf(walletAddress),
       ]);
       return {
         pol: parseFloat(ethers.utils.formatEther(polBal)).toFixed(4),
         usdc: parseFloat(ethers.utils.formatUnits(usdcBal, 6)).toFixed(2),
+        pusd: parseFloat(ethers.utils.formatUnits(pusdBal, 6)).toFixed(2),
       };
     } catch {
       // try next RPC
     }
   }
-  return { pol: '—', usdc: '—' };
+  return { pol: '—', usdc: '—', pusd: '—' };
 }
 
 async function getPositions(): Promise<any[]> {
@@ -410,26 +402,26 @@ async function broadcastSnapshot() {
     tradesDetected: 0, tradesCopied: 0, tradesFailed: 0, totalVolume: 0,
   };
 
-  const usdcBalance = parseFloat(balances.usdc);
+  const pusdBalance = parseFloat(balances.pusd);
 
   // ── Low balance auto-stop ──────────────────────────────────────────────
-  const lowBalance = usdcBalance < config.trading.minTradeSize;
+  const lowBalance = pusdBalance < config.trading.minTradeSize;
   if (lowBalance && botStatus === 'running') {
-    console.log(`⚠️  Low balance ($${balances.usdc} USDC.e < $${config.trading.minTradeSize} min). Stopping bot.`);
+    console.log(`⚠️  Low balance ($${balances.pusd} pUSD < $${config.trading.minTradeSize} min). Stopping bot.`);
     stopBot();
-    botError = `Auto-stopped: balance $${balances.usdc} is below min trade size $${config.trading.minTradeSize}`;
+    botError = `Auto-stopped: balance $${balances.pusd} is below min trade size $${config.trading.minTradeSize}`;
     botStatus = 'stopped';
   }
 
   // ── Auto-start when balance recovers ──────────────────────────────────
   if (
-    usdcBalance >= AUTO_START_THRESHOLD &&
+    pusdBalance >= AUTO_START_THRESHOLD &&
     botStatus === 'stopped' &&
     !manuallyStopped
   ) {
     // Clear any auto-stop error so the bot can restart cleanly
     botError = null;
-    console.log(`✅ Balance $${balances.usdc} ≥ $${AUTO_START_THRESHOLD} threshold. Auto-starting bot.`);
+    console.log(`✅ Balance $${balances.pusd} ≥ $${AUTO_START_THRESHOLD} threshold. Auto-starting bot.`);
     startBot();
   }
 
@@ -447,7 +439,6 @@ async function broadcastSnapshot() {
     recentTrades: tradeHistory.slice(0, 100),
     accountSummary,
     copyTargets: copyTargetManager.getAll(),
-    aiReviewState: reviewScheduler.getState(),
     config: {
       targetWallet: config.targetWallet,
       minTradeSize: config.trading.minTradeSize,
@@ -601,56 +592,6 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { trades: tradeHistory.slice(offset, offset + limit), total: tradeHistory.length });
     }
 
-    // POST /api/trades/refresh — pull recent activity from Polymarket and merge into local history
-    if (req.method === 'POST' && pathname === '/api/trades/refresh') {
-      if (!walletAddress) return json(res, 400, { error: 'Wallet not initialised' });
-      try {
-        const resp = await fetch(
-          `https://data-api.polymarket.com/activity?user=${walletAddress.toLowerCase()}&type=TRADE&limit=500&sortBy=TIMESTAMP&sortDirection=DESC`
-        );
-        const raw: any[] = await resp.json();
-        if (!Array.isArray(raw)) return json(res, 502, { error: 'Unexpected response from Polymarket' });
-
-        const existingTxHashes = new Set(tradeHistory.map((t) => t.id));
-        let added = 0;
-        for (const t of raw) {
-          const txHash: string = t.transactionHash || '';
-          if (!txHash || existingTxHashes.has(txHash)) continue;
-
-          // Skip if already recorded by onTradeCopied (same tokenId+side within 120s)
-          const tMs = (t.timestamp ?? 0) * 1000;
-          const alreadyRecorded = tradeHistory.some(
-            (e) => e.tokenId === t.asset && e.side === t.side?.toUpperCase() && Math.abs(e.timestamp - tMs) < 120_000
-          );
-          if (alreadyRecorded) continue;
-
-          addToHistory({
-            id: txHash,
-            timestamp: (t.timestamp ?? 0) * 1000,   // API returns seconds
-            market: t.title || '',
-            tokenId: t.asset || '',
-            outcome: t.outcome || '',
-            side: (t.side as 'BUY' | 'SELL') || 'BUY',
-            originalSize: t.usdcSize ?? 0,
-            copySize: t.usdcSize ?? 0,
-            price: t.price ?? 0,
-            shares: t.size ?? 0,
-            status: 'filled',
-            conditionId: t.conditionId || '',
-            entryCost: t.usdcSize ?? 0,
-          });
-          existingTxHashes.add(txHash);
-          added++;
-        }
-        // Re-sort by timestamp descending after merge
-        tradeHistory.sort((a, b) => b.timestamp - a.timestamp);
-        await saveTradeHistory();
-        broadcastSnapshot();
-        return json(res, 200, { ok: true, added, total: tradeHistory.length });
-      } catch (e: any) {
-        return json(res, 500, { error: e.message });
-      }
-    }
 
     // GET /api/account-summary
     if (req.method === 'GET' && pathname === '/api/account-summary') {
@@ -745,44 +686,6 @@ const server = http.createServer(async (req, res) => {
           allowKeywords: config.filters.allowKeywords,
         },
       });
-    }
-
-    // GET /api/traders
-    if (req.method === 'GET' && pathname === '/api/traders') {
-      return json(res, 200, { traders: traderDiscovery.getTraders() });
-    }
-
-    // POST /api/traders/discover  (body: { lookbackDays?: number })
-    if (req.method === 'POST' && pathname === '/api/traders/discover') {
-      const body = await readBody(req);
-      if (traderDiscovery.getStatus().status === 'running') {
-        return json(res, 409, { error: 'Discovery already running' });
-      }
-      const lookbackDays = Math.max(1, Math.min(90, parseInt(body.lookbackDays ?? '30') || 30));
-      traderDiscovery.triggerDiscovery({ lookbackDays });
-      return json(res, 202, { ok: true, status: traderDiscovery.getStatus() });
-    }
-
-    // GET /api/traders/discovery-status
-    if (req.method === 'GET' && pathname === '/api/traders/discovery-status') {
-      return json(res, 200, traderDiscovery.getStatus());
-    }
-
-    // ── AI Review ─────────────────────────────────────────────────────────────
-
-    // GET /api/ai/status
-    if (req.method === 'GET' && pathname === '/api/ai/status') {
-      return json(res, 200, reviewScheduler.getState());
-    }
-
-    // POST /api/ai/review  — trigger manual review
-    if (req.method === 'POST' && pathname === '/api/ai/review') {
-      if (reviewScheduler.getState().status === 'running') {
-        return json(res, 409, { error: 'Review already running' });
-      }
-      // Fire without awaiting so the HTTP response returns immediately
-      reviewScheduler.run().catch(console.error);
-      return json(res, 202, { ok: true, status: reviewScheduler.getState() });
     }
 
     // ── Copy Targets ──────────────────────────────────────────────────────────
@@ -939,7 +842,6 @@ wss.on('connection', async (ws, req) => {
     recentTrades: tradeHistory.slice(0, 100),
     accountSummary,
     copyTargets: copyTargetManager.getAll(),
-    aiReviewState: reviewScheduler.getState(),
     config: {
       targetWallet: config.targetWallet,
       minTradeSize: config.trading.minTradeSize,
@@ -1033,6 +935,7 @@ async function autoRedeem() {
       const after    = await usdcC.balanceOf(wallet.address);
       const received = parseFloat(ethers.utils.formatUnits(after.sub(before), 6));
       console.log(`✅ Auto-redeemed ${label}: +$${received.toFixed(2)} USDC.e (tx: ${tx.hash})`);
+      insertRedeem({ conditionId, label, received, txHash: tx.hash, source: 'auto_server' });
       broadcast({ type: 'redeemed', market: posGroup[0]?.title ?? label, received, txHash: tx.hash });
     } catch (e: any) {
       redeemedConditions.delete(conditionId);
@@ -1053,26 +956,15 @@ setInterval(() => fetchAccountSummary().catch(console.error), 5 * 60 * 1000);
 // ─── Start ────────────────────────────────────────────────────────────────────
 
 // Load persisted trade history + warm account summary before accepting connections
+initLogger();
+await initDb();
 await loadTradeHistory();
 fetchAccountSummary().catch(console.error);
-
-// ─── Trader Discovery ────────────────────────────────────────────────────────
-const traderDiscovery = new TraderDiscovery();
-await traderDiscovery.load();
-
-// ─── AI Review Scheduler ─────────────────────────────────────────────────────
-const reviewScheduler = new ReviewScheduler(
-  traderDiscovery,
-  () => bot,
-  () => tradeHistory,
-  () => broadcastSnapshot(),
-);
-reviewScheduler.start();
 
 server.listen(PORT, () => {
   console.log(`\n📊 Dashboard: http://localhost:${PORT}`);
   console.log('   Open in your browser to monitor the bot\n');
 });
 
-process.on('SIGINT', () => { reviewScheduler.stop(); stopBot(); server.close(); process.exit(0); });
-process.on('SIGTERM', () => { reviewScheduler.stop(); stopBot(); server.close(); process.exit(0); });
+process.on('SIGINT', () => { stopBot(); server.close(); process.exit(0); });
+process.on('SIGTERM', () => { stopBot(); server.close(); process.exit(0); });

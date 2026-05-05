@@ -1,13 +1,13 @@
 import { ethers } from 'ethers';
-import { ClobClient, Side, OrderType, AssetType } from '@polymarket/clob-client';
+import { ClobClient, Side, OrderType, AssetType, SignatureTypeV2 } from '@polymarket/clob-client-v2';
+import type { CreateOrderOptions, TickSize } from '@polymarket/clob-client-v2';
 import { config } from './config.js';
 import type { Trade } from './monitor.js';
 
 interface MarketMetadata {
   tickSize: number;
   tickSizeStr: string;
-  negRisk: boolean;
-  feeRateBps: number;
+  negRisk: boolean | null;
   conditionId?: string;
   timestamp: number;
 }
@@ -32,7 +32,7 @@ export class TradeExecutor {
   private wallet: ethers.Wallet;
   private provider: ethers.providers.JsonRpcProvider;
   private clobClient: ClobClient;
-  private apiCreds?: { apiKey: string; secret: string; passphrase: string };
+  private apiCreds?: { key: string; secret: string; passphrase: string };
   private marketCache: Map<string, MarketMetadata> = new Map();
   private readonly CACHE_TTL = 3600000;
   private readonly RETRY_CONFIG: RetryConfig = {
@@ -48,10 +48,6 @@ export class TradeExecutor {
     'function approve(address spender, uint256 amount) returns (bool)',
     'function decimals() view returns (uint8)',
   ];
-  private readonly CTF_ABI = [
-    'function isApprovedForAll(address owner, address operator) view returns (bool)',
-    'function setApprovalForAll(address operator, bool approved)',
-  ];
   private readonly MIN_PRIORITY_FEE_GWEI = parseFloat(process.env.MIN_PRIORITY_FEE_GWEI || '30');
   private readonly MIN_MAX_FEE_GWEI = parseFloat(process.env.MIN_MAX_FEE_GWEI || '60');
 
@@ -59,15 +55,13 @@ export class TradeExecutor {
     this.provider = new ethers.providers.JsonRpcProvider(config.rpcUrl);
     this.wallet = new ethers.Wallet(config.privateKey, this.provider);
 
-    this.clobClient = new ClobClient(
-      'https://clob.polymarket.com',
-      137,
-      this.wallet,
-      undefined,
-      undefined,
-      undefined,
-      config.polymarketGeoToken || undefined
-    );
+    this.clobClient = new ClobClient({
+      host: 'https://clob.polymarket.com',
+      chain: 137,
+      signer: this.wallet,
+      signatureType: SignatureTypeV2.EOA,
+      funderAddress: this.wallet.address,
+    });
   }
   
   async initialize(): Promise<void> {
@@ -75,7 +69,7 @@ export class TradeExecutor {
     console.log(`   Signing wallet (EOA): ${this.wallet.address}`);
     const funderAddress = this.wallet.address;
     console.log(`   Funder wallet: ${funderAddress}`);
-    console.log(`   Signature type: 0`);
+    console.log(`   Signature type: EOA (V2)`);
 
     try {
       await this.deriveAndReinitApiKeys(funderAddress);
@@ -117,7 +111,7 @@ export class TradeExecutor {
       creds = await this.clobClient.createApiKey();
     }
 
-    const apiKey = (creds as any)?.apiKey || (creds as any)?.key;
+    const apiKey = (creds as any)?.key;
     if (this.isApiError(creds) || !apiKey || !creds?.secret || !creds?.passphrase) {
       const errMsg = this.getApiErrorMessage(creds);
       throw new Error(`Could not create/derive API key: ${errMsg}`);
@@ -128,27 +122,22 @@ export class TradeExecutor {
     console.log(`   To export reusable values, run: npm run generate-api-creds (writes .polymarket-api-creds)`);
 
     this.apiCreds = {
-      apiKey,
+      key: apiKey,
       secret: creds.secret,
       passphrase: creds.passphrase,
     };
 
-    this.clobClient = new ClobClient(
-      'https://clob.polymarket.com',
-      137,
-      this.wallet,
-      {
-        key: apiKey,
-        secret: creds.secret,
-        passphrase: creds.passphrase,
-      },
-      0,
+    this.clobClient = new ClobClient({
+      host: 'https://clob.polymarket.com',
+      chain: 137,
+      signer: this.wallet,
+      creds: { key: apiKey, secret: creds.secret, passphrase: creds.passphrase },
+      signatureType: SignatureTypeV2.EOA,
       funderAddress,
-      config.polymarketGeoToken || undefined
-    );
+    });
   }
 
-  getWsAuth(): { apiKey: string; secret: string; passphrase: string } | undefined {
+  getWsAuth(): { key: string; secret: string; passphrase: string } | undefined {
     return this.apiCreds;
   }
 
@@ -196,37 +185,36 @@ export class TradeExecutor {
     }
 
     try {
-      const [tickSizeData, negRisk, feeRateBps] = await Promise.all([
-        this.clobClient.getTickSize(tokenId).catch(() => ({ minimum_tick_size: '0.01' })),
-        this.clobClient.getNegRisk(tokenId).catch(() => false),
-        this.clobClient.getFeeRateBps(tokenId).catch(() => 0),
+      const [tickSizeStr, negRisk] = await Promise.all([
+        this.clobClient.getTickSize(tokenId).catch((): string => '0.01'),
+        this.clobClient.getNegRisk(tokenId).catch(() => null),
       ]);
 
-      const tickSizeStr = (tickSizeData as any)?.minimum_tick_size || tickSizeData || '0.01';
       const tickSize = parseFloat(tickSizeStr);
 
       const metadata: MarketMetadata = {
         tickSize,
         tickSizeStr,
         negRisk,
-        feeRateBps,
         timestamp: now,
       };
 
-      this.marketCache.set(tokenId, metadata);
+      // Only cache when negRisk is confirmed — if null we'd lock in a wrong
+      // value for 1 h and every trade would silently fall back to regular exchange.
+      if (negRisk !== null) {
+        this.marketCache.set(tokenId, metadata);
+      }
 
       return metadata;
     } catch (error) {
       console.log(`⚠️  Could not fetch market metadata for ${tokenId}, using defaults`);
-      const defaultMetadata: MarketMetadata = {
+      // Do not cache — let the next trade attempt a fresh fetch.
+      return {
         tickSize: 0.01,
         tickSizeStr: '0.01',
-        negRisk: false,
-        feeRateBps: 0,
+        negRisk: null,
         timestamp: now,
       };
-      this.marketCache.set(tokenId, defaultMetadata);
-      return defaultMetadata;
     }
   }
 
@@ -327,13 +315,23 @@ export class TradeExecutor {
     console.log(`   Token ID: ${originalTrade.tokenId}`);
     console.log(`   Copy notional: ${copyNotional} USDC`);
 
-    return this.executeWithRetry(async () => {
-      if (orderType === 'FOK' || orderType === 'FAK') {
-        return this.executeMarketOrder(originalTrade, orderType, copyNotional);
-      } else {
-        return this.executeLimitOrder(originalTrade, copyNotional);
+    const meta = await this.getMarketMetadata(originalTrade.tokenId);
+    console.log(`   negRisk: ${meta.negRisk} | tickSize: ${meta.tickSizeStr}`);
+
+    try {
+      return await this.executeWithRetry(async () => {
+        if (orderType === 'FOK' || orderType === 'FAK') {
+          return this.executeMarketOrder(originalTrade, orderType, copyNotional);
+        } else {
+          return this.executeLimitOrder(originalTrade, copyNotional);
+        }
+      });
+    } catch (err: any) {
+      if ((err?.message ?? '').includes('order_version_mismatch')) {
+        this.marketCache.delete(originalTrade.tokenId);
       }
-    });
+      throw err;
+    }
   }
 
   private async executeWithRetry<T>(
@@ -421,6 +419,11 @@ export class TradeExecutor {
       return false;
     }
 
+    if (errorMsg.includes('order_version_mismatch') || responseData.includes('order_version_mismatch')) {
+      console.log('   ⚠️  order_version_mismatch — negRisk flag may have been wrong; cache cleared');
+      return false;
+    }
+
     return true;
   }
 
@@ -454,7 +457,6 @@ export class TradeExecutor {
         price: validatedPrice,
         size: copyShares,
         side: originalTrade.side as Side,
-        feeRateBps: metadata.feeRateBps,
       },
       orderOpts,
       OrderType.GTC
@@ -478,6 +480,7 @@ export class TradeExecutor {
     } else {
       const errorMsg = response.errorMsg || response.error || 'Unknown error';
       console.log(`❌ Order failed: ${errorMsg}`);
+      console.log(`   negRisk=${orderOpts.negRisk} tickSize=${orderOpts.tickSize} price=${validatedPrice} shares=${copyShares} side=${originalTrade.side}`);
       throw new Error(`Order placement failed: ${errorMsg}`);
     }
   }
@@ -512,7 +515,6 @@ export class TradeExecutor {
         amount: originalTrade.side === 'BUY' ? copyNotional : copyShares,
         price: validatedPrice,
         side: originalTrade.side as Side,
-        feeRateBps: metadata.feeRateBps,
         orderType: orderTypeEnum,
       },
       orderOpts,
@@ -538,6 +540,7 @@ export class TradeExecutor {
     } else {
       const errorMsg = response.errorMsg || response.error || 'Unknown error';
       console.log(`❌ Order failed: ${errorMsg}`);
+      console.log(`   negRisk=${orderOpts.negRisk} tickSize=${orderOpts.tickSize} price=${validatedPrice} amount=${originalTrade.side === 'BUY' ? copyNotional : copyShares} side=${originalTrade.side}`);
       throw new Error(`Order placement failed: ${errorMsg}`);
     }
   }
@@ -545,36 +548,26 @@ export class TradeExecutor {
   private async validateBalance(requiredAmount: number, tokenId: string): Promise<void> {
     try {
       const metadata = await this.getMarketMetadata(tokenId);
-      const exchangeAddress = metadata.negRisk ? config.contracts.negRiskExchange : config.contracts.exchange;
+      const exchangeAddress = metadata.negRisk === true
+        ? config.contracts.negRiskExchangeV2
+        : config.contracts.exchangeV2;
 
-      const usdc = new ethers.Contract(config.contracts.usdc, this.ERC20_ABI, this.wallet);
-      const ctf = new ethers.Contract(config.contracts.ctf, this.CTF_ABI, this.wallet);
-      const decimals = await usdc.decimals();
+      const pusd = new ethers.Contract(config.contracts.pusd, this.ERC20_ABI, this.wallet);
+      const decimals = await pusd.decimals();
       // Floor to token decimals — parseUnits throws if fractional digits exceed decimals
       const safeAmount = (Math.floor(requiredAmount * 1e6) / 1e6).toFixed(6);
       const required = ethers.utils.parseUnits(safeAmount, decimals);
 
-      const balance = await usdc.balanceOf(this.wallet.address);
+      const balance = await pusd.balanceOf(this.wallet.address);
       if (balance.lt(required)) {
         const bal = ethers.utils.formatUnits(balance, decimals);
-        throw new Error(`not enough balance / allowance (USDC.e balance ${bal} < required ${requiredAmount})`);
+        throw new Error(`not enough pUSD balance (${bal} < required ${requiredAmount})`);
       }
 
-      const allowanceCtf = await usdc.allowance(this.wallet.address, config.contracts.ctf);
-      if (allowanceCtf.lt(required)) {
-        const allow = ethers.utils.formatUnits(allowanceCtf, decimals);
-        throw new Error(`not enough balance / allowance (USDC.e allowance to CTF ${allow} < required ${requiredAmount})`);
-      }
-
-      const allowanceEx = await usdc.allowance(this.wallet.address, exchangeAddress);
+      const allowanceEx = await pusd.allowance(this.wallet.address, exchangeAddress);
       if (allowanceEx.lt(required)) {
         const allow = ethers.utils.formatUnits(allowanceEx, decimals);
-        throw new Error(`not enough balance / allowance (USDC.e allowance to Exchange ${allow} < required ${requiredAmount})`);
-      }
-
-      const approved = await ctf.isApprovedForAll(this.wallet.address, exchangeAddress);
-      if (!approved) {
-        console.log('   ⚠️  CTF approval missing for exchange (required for SELLs)');
+        throw new Error(`not enough pUSD allowance to Exchange (${allow} < required ${requiredAmount})`);
       }
 
       console.log(`   Balance/allowance check passed`);
@@ -588,10 +581,9 @@ export class TradeExecutor {
   async exitPosition(tokenId: string, shares: number): Promise<CopyExecutionResult> {
     console.log(`🔴 Exiting position: ${shares} shares of token ${tokenId}`);
 
-    const [orderbook, orderOpts, metadata] = await Promise.all([
+    const [orderbook, orderOpts] = await Promise.all([
       this.clobClient.getOrderBook(tokenId),
       this.getOrderOptions(tokenId),
-      this.getMarketMetadata(tokenId),
     ]);
 
     const bids = (orderbook.bids ?? []) as Array<{ price: string }>;
@@ -608,7 +600,6 @@ export class TradeExecutor {
         amount: shares,
         price: validatedPrice,
         side: Side.SELL,
-        feeRateBps: metadata.feeRateBps,
         orderType: OrderType.FOK,
       },
       orderOpts,
@@ -650,21 +641,19 @@ export class TradeExecutor {
     }
   }
 
-  private async getOrderOptions(tokenId: string): Promise<{ tickSize: any; negRisk: boolean }> {
+  private async getOrderOptions(tokenId: string): Promise<Partial<CreateOrderOptions>> {
     const metadata = await this.getMarketMetadata(tokenId);
-    return {
-      tickSize: metadata.tickSizeStr as any,
-      negRisk: metadata.negRisk,
-    };
+    const opts: Partial<CreateOrderOptions> = { tickSize: metadata.tickSizeStr as TickSize };
+    if (metadata.negRisk !== null) opts.negRisk = metadata.negRisk;
+    return opts;
   }
   private async ensureApprovals(): Promise<void> {
     if (this.approvalsChecked) return;
     this.approvalsChecked = true;
 
-    console.log('🔐 Checking required token approvals (EOA mode)...');
+    console.log('🔐 Checking required pUSD approvals (V2)...');
 
-    const usdc = new ethers.Contract(config.contracts.usdc, this.ERC20_ABI, this.wallet);
-    const ctf = new ethers.Contract(config.contracts.ctf, this.CTF_ABI, this.wallet);
+    const pusd = new ethers.Contract(config.contracts.pusd, this.ERC20_ABI, this.wallet);
 
     const maticBal = await this.provider.getBalance(this.wallet.address);
     const maticAmount = parseFloat(ethers.utils.formatEther(maticBal));
@@ -672,46 +661,26 @@ export class TradeExecutor {
       console.log(`   ⚠️  Low POL/MATIC for gas: ${maticAmount.toFixed(4)}`);
     }
 
-    const decimals = await usdc.decimals();
+    const decimals = await pusd.decimals();
     const minAllowance = ethers.utils.parseUnits(config.trading.maxTradeSize.toString(), decimals);
     const gasOverrides = await this.getGasOverrides();
 
-    const usdcSpenders = [
-      { name: 'CTF', address: config.contracts.ctf },
-      { name: 'CTF Exchange', address: config.contracts.exchange },
-      { name: 'Neg Risk CTF Exchange', address: config.contracts.negRiskExchange },
-      { name: 'Neg Risk Adapter', address: config.contracts.negRiskAdapter },
+    const pusdSpenders = [
+      { name: 'V2 Exchange',         address: config.contracts.exchangeV2 },
+      { name: 'V2 NegRisk Exchange', address: config.contracts.negRiskExchangeV2 },
+      { name: 'NegRisk Adapter',     address: config.contracts.negRiskAdapter },
     ];
 
-    for (const spender of usdcSpenders) {
-      const allowance = await usdc.allowance(this.wallet.address, spender.address);
+    for (const spender of pusdSpenders) {
+      const allowance = await pusd.allowance(this.wallet.address, spender.address);
       if (allowance.lt(minAllowance)) {
-        console.log(`   Approving USDC.e to ${spender.name} (${spender.address})...`);
-        const tx = await usdc.approve(spender.address, ethers.constants.MaxUint256, gasOverrides);
+        console.log(`   Approving pUSD to ${spender.name} (${spender.address})...`);
+        const tx = await pusd.approve(spender.address, ethers.constants.MaxUint256, gasOverrides);
         console.log(`   Tx: ${tx.hash}`);
         await tx.wait();
-        console.log(`   ✅ USDC.e approved to ${spender.name}`);
+        console.log(`   ✅ pUSD approved to ${spender.name}`);
       } else {
-        console.log(`   ✅ USDC.e already approved to ${spender.name}`);
-      }
-    }
-
-    const operators = [
-      { name: 'CTF Exchange', address: config.contracts.exchange },
-      { name: 'Neg Risk CTF Exchange', address: config.contracts.negRiskExchange },
-      { name: 'Neg Risk Adapter', address: config.contracts.negRiskAdapter },
-    ];
-
-    for (const operator of operators) {
-      const approved = await ctf.isApprovedForAll(this.wallet.address, operator.address);
-      if (!approved) {
-        console.log(`   Approving CTF for ${operator.name} (${operator.address})...`);
-        const tx = await ctf.setApprovalForAll(operator.address, true, gasOverrides);
-        console.log(`   Tx: ${tx.hash}`);
-        await tx.wait();
-        console.log(`   ✅ CTF approved for ${operator.name}`);
-      } else {
-        console.log(`   ✅ CTF already approved for ${operator.name}`);
+        console.log(`   ✅ pUSD already approved to ${spender.name}`);
       }
     }
 

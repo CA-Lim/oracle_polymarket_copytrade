@@ -9,6 +9,7 @@ import { RiskManager } from './risk-manager.js';
 import { copyTargetManager } from './copy-target-manager.js';
 import type { CopyTarget } from './copy-target-manager.js';
 import { AutoRedeemer } from './redeemer.js';
+import { initLogger, initDb } from './db.js';
 
 export class PolymarketCopyBot {
   private multiMonitor: MultiMonitor;
@@ -404,6 +405,8 @@ async function main() {
   });
 
   try {
+    initLogger();
+    await initDb();
     await bot.initialize();
     await bot.start();
   } catch (error) {

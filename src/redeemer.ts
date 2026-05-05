@@ -1,5 +1,6 @@
 import { ethers } from 'ethers';
 import { config } from './config.js';
+import { insertRedeem } from './db.js';
 
 const WCOL = '0x3A3BD7bb9528E159577F7C2e685CC81A765002E2';
 
@@ -113,6 +114,7 @@ export class AutoRedeemer {
         const posIdUsdc   = (await ctfRead.getPositionId(config.contracts.usdc, collId)).toBigInt();
         const assetBig    = assetBn.toBigInt();
 
+        const condBefore = await usdc.balanceOf(this.wallet.address);
         let tx: ethers.ContractTransaction;
 
         if (posIdWcol === assetBig) {
@@ -157,6 +159,9 @@ export class AutoRedeemer {
         console.log(`   ⏳ Tx: ${tx.hash}`);
         await tx.wait();
         this.redeemed.add(p.conditionId);
+        const condAfter = await usdc.balanceOf(this.wallet.address);
+        const condReceived = parseFloat(ethers.utils.formatUnits(condAfter.sub(condBefore), 6));
+        insertRedeem({ conditionId: p.conditionId, label, received: condReceived, txHash: tx.hash, source: 'auto_redeemer' });
         console.log(`   ✅ Redeemed`);
       } catch (e: any) {
         console.error(`   ❌ Failed to redeem "${label}": ${e.reason ?? e.message}`);

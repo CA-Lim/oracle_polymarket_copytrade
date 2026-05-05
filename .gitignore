@@ -5,3 +5,5 @@ dist/
 !README.md
 .env
 .polymarket-api-creds
+.claude/
+data/trades.json

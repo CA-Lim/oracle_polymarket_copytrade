@@ -28,7 +28,7 @@ interface LastTradeMessage {
 export type WsChannel = 'market' | 'user';
 
 export interface WsAuth {
-  apiKey: string;
+  key: string;
   secret: string;
   passphrase: string;
 }
@@ -368,8 +368,8 @@ export class WebSocketMonitor {
   private buildWsAuth(): { apikey: string; apiKey: string; secret: string; passphrase: string } | undefined {
     if (!this.auth) return undefined;
     return {
-      apikey: this.auth.apiKey,
-      apiKey: this.auth.apiKey,
+      apikey: this.auth.key,
+      apiKey: this.auth.key,
       secret: this.auth.secret,
       passphrase: this.auth.passphrase,
     };

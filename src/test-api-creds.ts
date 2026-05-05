@@ -1,6 +1,6 @@
 import dotenv from 'dotenv';
 import { Wallet } from 'ethers';
-import { ClobClient } from '@polymarket/clob-client';
+import { ClobClient, SignatureTypeV2 } from '@polymarket/clob-client-v2';
 
 dotenv.config();
 
@@ -21,15 +21,14 @@ async function main(): Promise<void> {
   }
 
   const signer = new Wallet(privateKey);
-  const client = new ClobClient(
-    HOST,
-    CHAIN_ID,
+  const client = new ClobClient({
+    host: HOST,
+    chain: CHAIN_ID,
     signer,
-    { key: apiKey, secret, passphrase },
-    0,
-    signer.address,
-    process.env.POLYMARKET_GEO_TOKEN || undefined
-  );
+    creds: { key: apiKey, secret, passphrase },
+    signatureType: SignatureTypeV2.EOA,
+    funderAddress: signer.address,
+  });
 
   const result: any = await client.getApiKeys();
   if (result?.error || result?.status >= 400) {
