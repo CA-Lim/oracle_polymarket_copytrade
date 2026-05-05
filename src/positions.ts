@@ -19,6 +19,7 @@ export class PositionTracker {
 
     for (const pos of positions || []) {
       const tokenId =
+        pos?.asset ||        // data-api.polymarket.com/positions
         pos?.asset_id ||
         pos?.token_id ||
         pos?.tokenId ||
@@ -30,8 +31,8 @@ export class PositionTracker {
       }
 
       const market =
+        pos?.conditionId ||  // data-api field
         pos?.condition_id ||
-        pos?.conditionId ||
         pos?.market ||
         pos?.market_id ||
         '';
@@ -39,7 +40,7 @@ export class PositionTracker {
       const outcome = pos?.outcome || pos?.side || 'YES';
 
       const shares = this.parseNumber(pos?.size ?? pos?.quantity ?? pos?.shares ?? pos?.balance ?? pos?.position);
-      const notional = this.parseNumber(pos?.usdcValue ?? pos?.notional ?? pos?.usdc ?? pos?.value ?? pos?.collateral);
+      const notional = this.parseNumber(pos?.initialValue ?? pos?.usdcValue ?? pos?.notional ?? pos?.usdc ?? pos?.value ?? pos?.collateral);
       const avgPrice =
         this.parseNumber(pos?.avgPrice ?? pos?.averagePrice ?? pos?.entryPrice ?? pos?.price) ||
         (shares > 0 ? Math.abs(notional / shares) : 0);
