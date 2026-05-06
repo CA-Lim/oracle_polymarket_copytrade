@@ -138,6 +138,33 @@ export class PolymarketCopyBot {
       return;
     }
 
+    // --- SELL: mirror the oracle's exit against our own position ---
+    if (trade.side === 'SELL') {
+      const posState = this.positions.getPosition(trade.tokenId);
+      if (!posState || posState.shares <= 0) {
+        console.log(`⏭️  Skipping SELL — no position held for this token`);
+        return;
+      }
+      console.log(`🔴 Copying SELL: exiting ${posState.shares.toFixed(4)} shares`);
+      try {
+        const result = await this.executor.exitPosition(trade.tokenId, posState.shares);
+        this.positions.recordFill({ trade, notional: result.copyNotional, shares: posState.shares, price: result.price, side: 'SELL' });
+        this.stats.tradesCopied++;
+        this.stats.totalVolume += result.copyNotional;
+        console.log(`✅ Copy SELL executed`);
+        console.log(`📊 Session Stats: ${this.stats.tradesCopied}/${this.stats.tradesDetected} copied, ${this.stats.tradesFailed} failed`);
+        this.onTradeCopied?.(trade, result);
+      } catch (e: any) {
+        this.stats.tradesFailed++;
+        console.error(`❌ Copy SELL failed: ${e.message}`);
+        console.log(`📊 Session Stats: ${this.stats.tradesCopied}/${this.stats.tradesDetected} copied, ${this.stats.tradesFailed} failed`);
+        this.onTradeFailed?.(trade, e.message);
+      }
+      return;
+    }
+
+    // --- BUY filters (not applicable to SELL) ---
+
     // Skip very speculative entries (price < 0.20 — longshots almost always go to zero)
     if (trade.price < 0.20) {
       console.log(`⏭️  Skipping trade — entry price ${trade.price.toFixed(3)} too speculative (<0.20)`);
