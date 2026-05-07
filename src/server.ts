@@ -338,15 +338,16 @@ try {
 // Fallback public RPCs if QuikNode times out
 const FALLBACK_RPCS = [
   config.rpcUrl,
+  'https://polygon-bor.publicnode.com',
+  'https://1rpc.io/matic',
   'https://polygon-rpc.com',
   'https://rpc.ankr.com/polygon',
-  'https://polygon.llamarpc.com',
 ];
 
 async function getBalances(): Promise<{ pol: string; usdc: string; pusd: string }> {
   for (const rpc of FALLBACK_RPCS) {
     try {
-      const provider = new ethers.providers.JsonRpcProvider(rpc);
+      const provider = new ethers.providers.StaticJsonRpcProvider(rpc, { chainId: 137, name: 'matic' });
       const [polBal, usdcBal, pusdBal] = await Promise.all([
         provider.getBalance(walletAddress),
         new ethers.Contract(config.contracts.usdc, ERC20_ABI, provider).balanceOf(walletAddress),
@@ -780,7 +781,7 @@ const server = http.createServer(async (req, res) => {
       ];
       const ERC20_ABI_BAL = ['function balanceOf(address) view returns (uint256)'];
 
-      const provider = new ethers.providers.JsonRpcProvider(config.rpcUrl);
+      const provider = new ethers.providers.StaticJsonRpcProvider(config.rpcUrl, { chainId: 137, name: 'matic' });
       const wallet   = new ethers.Wallet(config.privateKey, provider);
       const ctf      = new ethers.Contract(config.contracts.ctf, CTF_ABI, wallet);
       const usdc     = new ethers.Contract(config.contracts.usdc, ERC20_ABI_BAL, provider);
@@ -869,7 +870,7 @@ async function autoRedeem() {
     'function balanceOf(address account, uint256 id) external view returns (uint256)',
   ];
   const ERC20_B    = ['function balanceOf(address) view returns (uint256)'];
-  const provider   = new ethers.providers.JsonRpcProvider(config.rpcUrl);
+  const provider   = new ethers.providers.StaticJsonRpcProvider(config.rpcUrl, { chainId: 137, name: 'matic' });
   const wallet     = new ethers.Wallet(config.privateKey, provider);
   const negRisk    = new ethers.Contract(config.contracts.negRiskAdapter, NEG_RISK_ABI, wallet);
   const ctf        = new ethers.Contract(config.contracts.ctf, CTF_ABI, wallet);

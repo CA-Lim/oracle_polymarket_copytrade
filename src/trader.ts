@@ -30,7 +30,7 @@ export interface CopyExecutionResult {
 
 export class TradeExecutor {
   private wallet: ethers.Wallet;
-  private provider: ethers.providers.JsonRpcProvider;
+  private provider: ethers.providers.StaticJsonRpcProvider;
   private clobClient: ClobClient;
   private apiCreds?: { key: string; secret: string; passphrase: string };
   private marketCache: Map<string, MarketMetadata> = new Map();
@@ -52,7 +52,7 @@ export class TradeExecutor {
   private readonly MIN_MAX_FEE_GWEI = parseFloat(process.env.MIN_MAX_FEE_GWEI || '60');
 
   constructor() {
-    this.provider = new ethers.providers.JsonRpcProvider(config.rpcUrl);
+    this.provider = new ethers.providers.StaticJsonRpcProvider(config.rpcUrl, { chainId: 137, name: 'matic' });
     this.wallet = new ethers.Wallet(config.privateKey, this.provider);
 
     this.clobClient = new ClobClient({

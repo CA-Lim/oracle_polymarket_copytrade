@@ -45,7 +45,7 @@ async function main() {
   if (!privateKey) throw new Error('PRIVATE_KEY not set');
 
   const amountUsdc = parseFloat(process.argv[2] ?? '50');
-  const provider = new ethers.providers.JsonRpcProvider(rpcUrl);
+  const provider = new ethers.providers.StaticJsonRpcProvider(rpcUrl, { chainId: 137, name: 'matic' });
   const wallet = new ethers.Wallet(privateKey, provider);
 
   // Dynamically set gas: tip=30 Gwei, maxFee = 2× current base fee + tip

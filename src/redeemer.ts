@@ -26,13 +26,13 @@ const MAX_FAIL_COUNT = 3;
 
 export class AutoRedeemer {
   private wallet: ethers.Wallet;
-  private provider: ethers.providers.JsonRpcProvider;
+  private provider: ethers.providers.StaticJsonRpcProvider;
   private redeemed  = new Set<string>();
   private failCount = new Map<string, number>();
   private intervalId?: NodeJS.Timeout;
 
   constructor() {
-    this.provider = new ethers.providers.JsonRpcProvider(config.rpcUrl);
+    this.provider = new ethers.providers.StaticJsonRpcProvider(config.rpcUrl, { chainId: 137, name: 'matic' });
     this.wallet = new ethers.Wallet(config.privateKey, this.provider);
   }
 
