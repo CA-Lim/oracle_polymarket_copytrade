@@ -172,13 +172,6 @@ export class PolymarketCopyBot {
       return;
     }
 
-    // Skip late-stage entries (price > 0.80 — almost no upside, full downside risk)
-    if (trade.price > 0.80) {
-      console.log(`⏭️  Skipping trade — entry price ${trade.price.toFixed(3)} too late (>0.80, risk/reward unfavorable)`);
-      this.onTradeFailed?.(trade, `entry price ${trade.price.toFixed(3)} too late (>0.80)`);
-      return;
-    }
-
     // Per-target market keyword filter
     const filterResult = this.checkMarketFilter(trade.market, target);
     if (!filterResult.allowed) {
