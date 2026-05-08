@@ -60,7 +60,7 @@ export class AutoRedeemer {
     let positions: any[];
     try {
       const res = await fetch(
-        `https://data-api.polymarket.com/positions?user=${this.wallet.address}&sizeThreshold=.01`
+        `https://data-api.polymarket.com/positions?user=${this.wallet.address}&sizeThreshold=.01&limit=500`
       );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       positions = await res.json();

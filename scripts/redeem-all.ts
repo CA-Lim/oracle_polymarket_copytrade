@@ -10,7 +10,7 @@ console.log('Wallet:', wallet.address);
 
 (async () => {
   const res = await fetch(
-    `https://data-api.polymarket.com/positions?user=${wallet.address}&sizeThreshold=.01`
+    `https://data-api.polymarket.com/positions?user=${wallet.address}&sizeThreshold=.01&limit=500`
   );
   const positions: any[] = await res.json();
   const redeemable = positions.filter(
