@@ -112,12 +112,20 @@ export class AutoRedeemer {
         const gas         = await this.getGasOverrides();
         const zero        = ethers.BigNumber.from(0);
 
+        // Determine outcome index from API data: YES=0 ([balance,0]), NO=1 ([0,balance]).
+        // Non-YES/NO spread markets fall back to trying both orderings.
+        const outcomeStr = (p.outcome ?? '').toLowerCase();
+        const amountsYes = [balance, zero];
+        const amountsNo  = [zero, balance];
+        const primaryAmounts   = outcomeStr === 'no'  ? amountsNo  : amountsYes;
+        const secondaryAmounts = outcomeStr === 'no'  ? amountsYes : amountsNo;
+
         // Build ordered list of redemption attempts. negRiskAdapter handles the vast
         // majority of Polymarket markets (wcol-backed). CTF fallbacks cover standard
-        // binary markets. The previous posId-matching approach failed when the API's
-        // asset ID format didn't align with the locally derived positionId.
+        // binary markets.
         const attempts: Array<() => Promise<ethers.ContractTransaction>> = [
-          () => negRisk.redeemPositions(conditionId, [balance, zero], gas),
+          () => negRisk.redeemPositions(conditionId, primaryAmounts, gas),
+          () => negRisk.redeemPositions(conditionId, secondaryAmounts, gas),
         ];
 
         // Also try derived conditionId — data-api sometimes returns a questionId
@@ -125,13 +133,16 @@ export class AutoRedeemer {
         try {
           const derived = await negRisk.getConditionId(conditionId);
           if (!ethers.BigNumber.from(derived).isZero() && derived !== conditionId) {
-            attempts.push(() => negRisk.redeemPositions(derived, [balance, zero], gas));
+            attempts.push(() => negRisk.redeemPositions(derived, primaryAmounts, gas));
+            attempts.push(() => negRisk.redeemPositions(derived, secondaryAmounts, gas));
           }
         } catch { /* conditionId is already the direct CTF conditionId */ }
 
         attempts.push(
           () => ctf.redeemPositions(config.contracts.usdc, ethers.constants.HashZero, conditionId, [1], gas),
+          () => ctf.redeemPositions(config.contracts.usdc, ethers.constants.HashZero, conditionId, [2], gas),
           () => ctf.redeemPositions(WCOL, ethers.constants.HashZero, conditionId, [1], gas),
+          () => ctf.redeemPositions(WCOL, ethers.constants.HashZero, conditionId, [2], gas),
         );
 
         let tx: ethers.ContractTransaction | undefined;
