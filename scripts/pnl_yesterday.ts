@@ -2,10 +2,10 @@ import { ethers } from 'ethers';
 import * as dotenv from 'dotenv';
 dotenv.config();
 
-const WALLET = '0x51d80Bf31c374F1fBaD43cD90B29295633587536';
+const WALLET = '0x5d1d9cfd66ee3068c2a8a57dedf1e1b006dcafd2';
 const CTF    = '0x4D97DCd97eC945f40cF65F87097ACe5EA0476045';
 const CTF_ABI = ['function balanceOf(address account, uint256 id) external view returns (uint256)'];
-const SINCE  = 1778025600; // 2026-05-06 00:00:00 UTC
+const SINCE  = 1778112000; // 2026-05-07 00:00:00 UTC (yesterday)
 
 async function main() {
   const rpc = process.env.RPC_URL || 'https://polygon-rpc.com';
@@ -56,7 +56,7 @@ async function main() {
   }
 
   console.log('\n========================================');
-  console.log(`  PnL SINCE MAY 6  |  wallet: ...${WALLET.slice(-6)}`);
+  console.log(`  PnL SINCE MAY 7  |  wallet: ...${WALLET.slice(-6)}`);
   console.log('========================================');
   console.log(`Trades placed:    ${activity.length}  ($${bought.toFixed(2)} deployed)`);
   console.log(`Resolved wins:    ${wins.length}`);
