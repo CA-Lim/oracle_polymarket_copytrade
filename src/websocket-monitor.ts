@@ -386,9 +386,11 @@ export class WebSocketMonitor {
       payload.auth = this.buildWsAuth();
     }
 
-    // Only send if we have something to subscribe to
+    // Only send if we have something to subscribe to and socket is fully open
     if ((payload.assets_ids && payload.assets_ids.length) || (payload.markets && payload.markets.length)) {
-      this.ws.send(JSON.stringify(payload));
+      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        this.ws.send(JSON.stringify(payload));
+      }
     }
   }
 }
