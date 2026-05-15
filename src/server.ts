@@ -754,6 +754,18 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { ok: true, target: copyTargetManager.get(addr) });
     }
 
+    // POST /api/positions/reconcile
+    if (req.method === 'POST' && pathname === '/api/positions/reconcile') {
+      if (!bot) return json(res, 503, { error: 'Bot not running' });
+      try {
+        await bot.reconcilePositions();
+        broadcastSnapshot();
+        return json(res, 200, { ok: true });
+      } catch (e: any) {
+        return json(res, 500, { error: e.message });
+      }
+    }
+
     // POST /api/positions/:tokenId/exit  (body: { shares: number })
     const exitPosMatch = pathname.match(/^\/api\/positions\/([^/]+)\/exit$/);
     if (req.method === 'POST' && exitPosMatch) {

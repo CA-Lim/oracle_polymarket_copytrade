@@ -274,7 +274,7 @@ export class PolymarketCopyBot {
     }
   }
 
-  private async reconcilePositions(): Promise<void> {
+  async reconcilePositions(): Promise<void> {
     try {
       const positions = await this.executor.getPositions();
       if (!positions || positions.length === 0) {

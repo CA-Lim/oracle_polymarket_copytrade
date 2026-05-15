@@ -209,7 +209,14 @@
     <div class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
       <div class="px-4 py-3 border-b border-gray-800 flex items-center justify-between">
         <h2 class="font-semibold text-white">Open Positions</h2>
-        <span class="text-xs text-gray-500" x-text="(data.positions?.length ?? 0) + ' positions'"></span>
+        <div class="flex items-center gap-3">
+          <span class="text-xs text-gray-500" x-text="(data.positions?.length ?? 0) + ' positions'"></span>
+          <button @click="reconcilePositions()"
+            class="text-xs px-2 py-1 rounded bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-white transition-colors"
+            :disabled="reconciling"
+            x-text="reconciling ? 'Refreshing…' : '↻ Refresh'">
+          </button>
+        </div>
       </div>
       <div class="overflow-x-auto">
         <table class="w-full">
@@ -685,6 +692,7 @@
         redeeming: {},
         redeemMsg: '',
         exitingPos: {},
+        reconciling: false,
         addTargetModal: { show: false, address: '', saving: false, error: '' },
         filterModal: {
           show: false, address: '', saving: false, error: '',
@@ -836,6 +844,24 @@
         },
 
         // ── Exit position ─────────────────────────────────────────────────
+        async reconcilePositions() {
+          if (this.reconciling) return;
+          this.reconciling = true;
+          try {
+            const r = await fetch('/api/positions/reconcile', { method: 'POST' });
+            const d = await r.json();
+            if (r.ok) {
+              this.showToast('✅ Positions refreshed', true);
+            } else {
+              this.showToast(`❌ Refresh failed: ${d.error}`, false);
+            }
+          } catch {
+            this.showToast('❌ Network error', false);
+          } finally {
+            this.reconciling = false;
+          }
+        },
+
         async exitPosition(pos) {
           if (this.exitingPos[pos.asset]) return;
           if (!confirm(`Exit position: ${Number(pos.size).toFixed(2)} shares of "${pos.title}"?\n\nThis places a FOK sell order at market price.`)) return;
