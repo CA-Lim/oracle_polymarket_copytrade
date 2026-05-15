@@ -624,7 +624,7 @@ export class TradeExecutor {
 
   async getPositions(): Promise<any[]> {
     try {
-      const res = await fetch(`https://data-api.polymarket.com/positions?user=${this.wallet.address}&sizeThreshold=.01`);
+      const res = await fetch(`https://data-api.polymarket.com/positions?user=${this.wallet.address}&sizeThreshold=.01&limit=500`);
       if (!res.ok) return [];
       return await res.json();
     } catch {
