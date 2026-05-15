@@ -369,7 +369,7 @@ async function getPositions(): Promise<any[]> {
   if (!walletAddress) return [];
   try {
     const res = await fetch(
-      `https://data-api.polymarket.com/positions?user=${walletAddress}&sizeThreshold=.1`
+      `https://data-api.polymarket.com/positions?user=${walletAddress}&sizeThreshold=.01&limit=500`
     );
     const data = await res.json();
     if (!Array.isArray(data)) return [];
