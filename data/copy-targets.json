@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": 1776244556918,
+  "updatedAt": 1778663756918,
   "targets": [
     {
       "address": "0xee613b3fc183ee44f9da9c05f53e2da107e3debf",
@@ -292,6 +292,47 @@
         "maxPerMarketNotional": 14
       },
       "addedAt": 1776244556917
+    },
+    {
+      "address": "0x2005d16a84ceefa912d4e380cd32e7ff827875ea",
+      "enabled": true,
+      "label": "RN1 – Sports Scalper (NBA/Tennis/Soccer/CS2)",
+      "topCategories": ["sports", "esports"],
+      "aiReason": "High-frequency bot with $593k realizedPnL across 500 positions (~40% ROI). Best categories: American Sports 97% WR/146% ROI, Esports 94%/42%, Tennis 88%/43%, Soccer wins 81%/63%. Weak on draw markets, O/U total goals, CBA basketball, and misc. Individual trades mostly tiny scalps (<$10 each) — minSourceTradeSize=100 filters to top 7% deliberate bets which correspond to the 99%+ WR position tier ($200-1k invested).",
+      "addedBy": "manual",
+      "addedAt": 1778663756918,
+      "settings": {
+        "allowKeywords": [
+          "vs.",
+          "win on",
+          "wta",
+          "atp",
+          "counter-strike"
+        ],
+        "blockKeywords": [
+          "draw",
+          "o/u",
+          "both teams",
+          "btts",
+          "relegate",
+          "qualify",
+          "chinese basketball",
+          "guangdong",
+          "beijing duck",
+          "crypto",
+          "bitcoin",
+          "election",
+          "politics",
+          "trump"
+        ],
+        "multiplier": 0.05,
+        "maxTradeSize": 20,
+        "minTradeSize": 1,
+        "maxPerMarketNotional": 50,
+        "minPrice": 0.05,
+        "maxPrice": 0.90,
+        "minSourceTradeSize": 100
+      }
     },
     {
       "address": "0x69af844d4fbacebfc1c4124b0978801db3600a19",

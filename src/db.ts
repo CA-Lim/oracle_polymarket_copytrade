@@ -1,4 +1,5 @@
 import pg from 'pg';
+import type { CopyTarget } from './copy-target-manager.js';
 
 const { Pool } = pg;
 
@@ -49,6 +50,17 @@ CREATE TABLE IF NOT EXISTS logs (
 );
 CREATE INDEX IF NOT EXISTS logs_ts_idx     ON logs (ts DESC);
 CREATE INDEX IF NOT EXISTS logs_errors_idx ON logs (ts DESC) WHERE level = 'error';
+
+CREATE TABLE IF NOT EXISTS copy_targets (
+  address          TEXT    PRIMARY KEY,
+  enabled          BOOLEAN NOT NULL DEFAULT true,
+  label            TEXT    NOT NULL DEFAULT '',
+  top_categories   JSONB   NOT NULL DEFAULT '[]',
+  ai_reason        TEXT    NOT NULL DEFAULT '',
+  added_by         TEXT    NOT NULL DEFAULT 'manual',
+  added_at         BIGINT  NOT NULL DEFAULT 0,
+  settings         JSONB   NOT NULL DEFAULT '{}'
+);
 
 CREATE OR REPLACE VIEW pnl_summary AS
 SELECT
@@ -176,4 +188,52 @@ export function insertRedeem(params: {
      ON CONFLICT (tx_hash) DO NOTHING`,
     [params.conditionId, params.label, params.received, params.txHash, params.source]
   ).catch(e => process.stderr.write(`⚠️  insertRedeem error: ${e.message}\n`));
+}
+
+// ── Copy targets DB helpers ──────────────────────────────────────────────────
+
+export async function dbGetCopyTargets(): Promise<CopyTarget[]> {
+  if (!pool) return [];
+  const result = await pool.query('SELECT * FROM copy_targets ORDER BY added_at ASC');
+  return result.rows.map(row => ({
+    address:        row.address,
+    enabled:        row.enabled,
+    label:          row.label,
+    topCategories:  row.top_categories,
+    aiReason:       row.ai_reason,
+    addedBy:        row.added_by,
+    addedAt:        Number(row.added_at),
+    settings:       row.settings,
+  }));
+}
+
+export async function dbUpsertCopyTarget(target: CopyTarget): Promise<void> {
+  if (!pool) return;
+  await pool.query(
+    `INSERT INTO copy_targets
+       (address, enabled, label, top_categories, ai_reason, added_by, added_at, settings)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+     ON CONFLICT (address) DO UPDATE SET
+       enabled        = EXCLUDED.enabled,
+       label          = EXCLUDED.label,
+       top_categories = EXCLUDED.top_categories,
+       ai_reason      = EXCLUDED.ai_reason,
+       added_by       = EXCLUDED.added_by,
+       settings       = EXCLUDED.settings`,
+    [
+      target.address,
+      target.enabled,
+      target.label,
+      JSON.stringify(target.topCategories),
+      target.aiReason,
+      target.addedBy,
+      target.addedAt,
+      JSON.stringify(target.settings),
+    ]
+  );
+}
+
+export async function dbDeleteCopyTarget(address: string): Promise<void> {
+  if (!pool) return;
+  await pool.query('DELETE FROM copy_targets WHERE address = $1', [address]);
 }

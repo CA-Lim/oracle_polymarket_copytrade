@@ -121,6 +121,16 @@ export class PolymarketCopyBot {
 
     const target = trade.copyTarget;
 
+    // Stale-signal guard: skip if trade is older than 10 minutes
+    const MAX_TRADE_AGE_MS = 10 * 60 * 1000;
+    const tradeAgeMs = Date.now() - trade.timestamp;
+    if (tradeAgeMs > MAX_TRADE_AGE_MS) {
+      const ageMin = Math.round(tradeAgeMs / 60000);
+      console.log(`⏭️  Skipping trade — signal is ${ageMin}min old (max ${MAX_TRADE_AGE_MS / 60000}min)`);
+      this.onTradeFailed?.(trade, `stale signal (${ageMin}min old)`);
+      return;
+    }
+
     console.log('\n' + '='.repeat(50));
     console.log(`🎯 NEW TRADE DETECTED`);
     console.log(`   Source: ${target.label} (${trade.sourceAddress})`);
@@ -165,10 +175,25 @@ export class PolymarketCopyBot {
 
     // --- BUY filters (not applicable to SELL) ---
 
-    // Skip very speculative entries (price < 0.20 — longshots almost always go to zero)
-    if (trade.price < 0.20) {
-      console.log(`⏭️  Skipping trade — entry price ${trade.price.toFixed(3)} too speculative (<0.20)`);
-      this.onTradeFailed?.(trade, `entry price ${trade.price.toFixed(3)} too speculative`);
+    // Per-wallet price floor / ceiling
+    const priceFloor   = target.settings.minPrice   ?? 0.20;
+    const priceCeiling = target.settings.maxPrice   ?? 1.0;
+    if (trade.price < priceFloor) {
+      console.log(`⏭️  Skipping trade — entry price ${trade.price.toFixed(3)} below floor ${priceFloor}`);
+      this.onTradeFailed?.(trade, `entry price ${trade.price.toFixed(3)} below floor ${priceFloor}`);
+      return;
+    }
+    if (priceCeiling < 1.0 && trade.price > priceCeiling) {
+      console.log(`⏭️  Skipping trade — entry price ${trade.price.toFixed(3)} above ceiling ${priceCeiling}`);
+      this.onTradeFailed?.(trade, `entry price ${trade.price.toFixed(3)} above ceiling ${priceCeiling}`);
+      return;
+    }
+
+    // Per-wallet minimum source trade size
+    const minSrc = target.settings.minSourceTradeSize ?? 0;
+    if (minSrc > 0 && trade.size < minSrc) {
+      console.log(`⏭️  Skipping trade — source trade $${trade.size} below minimum $${minSrc}`);
+      this.onTradeFailed?.(trade, `source trade $${trade.size} below minimum $${minSrc}`);
       return;
     }
 
@@ -215,6 +240,15 @@ export class PolymarketCopyBot {
       if (drift.drifted) {
         console.log(`⏭️  Skipping trade — price drifted ${(drift.driftPct * 100).toFixed(1)}% (trader bought: ${trade.price.toFixed(3)} → market now: ${drift.currentPrice.toFixed(3)})`);
         this.onTradeFailed?.(trade, `price drifted ${(drift.driftPct * 100).toFixed(1)}% (trader: ${trade.price.toFixed(3)} → now: ${drift.currentPrice.toFixed(3)})`);
+        return;
+      }
+
+      // Collapse guard: if current price dropped >50% below source, the position is likely dead
+      const COLLAPSE_THRESHOLD = 0.50;
+      if (drift.currentPrice < trade.price * (1 - COLLAPSE_THRESHOLD)) {
+        const dropPct = ((1 - drift.currentPrice / trade.price) * 100).toFixed(1);
+        console.log(`⏭️  Skipping trade — price collapsed ${dropPct}% below source (${trade.price.toFixed(3)} → ${drift.currentPrice.toFixed(3)})`);
+        this.onTradeFailed?.(trade, `price collapsed ${dropPct}% (${trade.price.toFixed(3)} → ${drift.currentPrice.toFixed(3)})`);
         return;
       }
 

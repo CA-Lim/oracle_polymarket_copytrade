@@ -411,8 +411,10 @@
                   </div>
                 </td>
                 <td class="px-4 py-3 text-xs text-gray-400 font-mono space-y-0.5">
-                  <div>×<span x-text="(t.settings?.multiplier ?? 0.1)"></span> mult</div>
-                  <div>$<span x-text="(t.settings?.minTradeSize ?? 1)"></span>–$<span x-text="(t.settings?.maxTradeSize ?? 5)"></span></div>
+                  <div>×<span x-text="(t.settings?.multiplier ?? 0.1)"></span> mult · $<span x-text="(t.settings?.minTradeSize ?? 1)"></span>–$<span x-text="(t.settings?.maxTradeSize ?? 5)"></span></div>
+                  <div>price <span x-text="(t.settings?.minPrice ?? 0.20).toFixed(2)"></span>–<span x-text="(t.settings?.maxPrice ?? 1.0).toFixed(2)"></span>
+                    <span x-show="(t.settings?.minSourceTradeSize ?? 0) > 0" class="text-yellow-500"> · src≥$<span x-text="t.settings?.minSourceTradeSize"></span></span>
+                  </div>
                   <div x-show="t.settings?.allowKeywords?.length" class="text-green-600 truncate max-w-[140px]" :title="'Allow: '+t.settings?.allowKeywords?.join(', ')">
                     ✅ <span x-text="t.settings?.allowKeywords?.slice(0,2).join(', ')"></span><span x-show="t.settings?.allowKeywords?.length > 2">…</span>
                   </div>
@@ -434,10 +436,16 @@
                   </button>
                 </td>
                 <td class="px-4 py-3 text-center">
-                  <button @click="removeTarget(t.address)"
-                          class="text-xs px-2 py-0.5 rounded border border-red-500/30 text-red-400 hover:bg-red-500/10 transition">
-                    Remove
-                  </button>
+                  <div class="flex items-center justify-center gap-1.5">
+                    <button @click="openFilterModal(t)"
+                            class="text-xs px-2 py-0.5 rounded border border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/10 transition">
+                      Filters
+                    </button>
+                    <button @click="removeTarget(t.address)"
+                            class="text-xs px-2 py-0.5 rounded border border-red-500/30 text-red-400 hover:bg-red-500/10 transition">
+                      Remove
+                    </button>
+                  </div>
                 </td>
               </tr>
             </template>
@@ -468,6 +476,102 @@
           </button>
         </div>
         <p x-show="addTargetModal.error" class="text-xs text-red-400 mt-2" x-text="addTargetModal.error"></p>
+      </div>
+    </div>
+
+    <!-- ── EDIT FILTERS MODAL ───────────────────────────────────────────── -->
+    <div x-show="filterModal.show" x-transition
+         class="fixed inset-0 z-40 flex items-center justify-center bg-black/60"
+         @click.self="filterModal.show = false">
+      <div class="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-full max-w-lg shadow-2xl">
+        <div class="flex items-center justify-between mb-5">
+          <div>
+            <h3 class="font-semibold text-white">Wallet Filters</h3>
+            <p class="text-xs text-gray-500 mt-0.5 font-mono" x-text="filterModal.address"></p>
+          </div>
+          <button @click="filterModal.show = false" class="text-gray-500 hover:text-white text-lg leading-none">✕</button>
+        </div>
+
+        <!-- Price range -->
+        <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Entry Price Range</p>
+        <div class="grid grid-cols-2 gap-3 mb-4">
+          <div>
+            <label class="block text-xs text-gray-500 mb-1">Min price (floor)</label>
+            <input x-model.number="filterModal.settings.minPrice" type="number" min="0" max="1" step="0.01"
+                   class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 transition">
+            <p class="text-xs text-gray-600 mt-1">Skip if oracle price &lt; this (default 0.20)</p>
+          </div>
+          <div>
+            <label class="block text-xs text-gray-500 mb-1">Max price (ceiling)</label>
+            <input x-model.number="filterModal.settings.maxPrice" type="number" min="0" max="1" step="0.01"
+                   class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 transition">
+            <p class="text-xs text-gray-600 mt-1">Skip if oracle price &gt; this (default 1.0 = off)</p>
+          </div>
+        </div>
+
+        <!-- Source trade size -->
+        <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Source Trade Size</p>
+        <div class="mb-4">
+          <label class="block text-xs text-gray-500 mb-1">Min source trade ($USDC)</label>
+          <input x-model.number="filterModal.settings.minSourceTradeSize" type="number" min="0" step="1"
+                 class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 transition">
+          <p class="text-xs text-gray-600 mt-1">Only copy if the oracle's own trade was at least this size (0 = off)</p>
+        </div>
+
+        <!-- Position sizing -->
+        <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Position Sizing</p>
+        <div class="grid grid-cols-3 gap-3 mb-4">
+          <div>
+            <label class="block text-xs text-gray-500 mb-1">Multiplier</label>
+            <input x-model.number="filterModal.settings.multiplier" type="number" min="0.01" max="10" step="0.01"
+                   class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 transition">
+          </div>
+          <div>
+            <label class="block text-xs text-gray-500 mb-1">Min trade ($)</label>
+            <input x-model.number="filterModal.settings.minTradeSize" type="number" min="0.1" step="0.1"
+                   class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 transition">
+          </div>
+          <div>
+            <label class="block text-xs text-gray-500 mb-1">Max trade ($)</label>
+            <input x-model.number="filterModal.settings.maxTradeSize" type="number" min="1" step="1"
+                   class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 transition">
+          </div>
+        </div>
+
+        <!-- Per-market cap -->
+        <div class="mb-4">
+          <label class="block text-xs text-gray-500 mb-1">Per-market notional cap ($, 0 = off)</label>
+          <input x-model.number="filterModal.settings.maxPerMarketNotional" type="number" min="0" step="1"
+                 class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 transition">
+        </div>
+
+        <!-- Keywords -->
+        <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Market Keywords</p>
+        <div class="grid grid-cols-2 gap-3 mb-5">
+          <div>
+            <label class="block text-xs text-gray-500 mb-1">Block keywords (comma-sep)</label>
+            <input x-model="filterModal.settings.blockKeywords" type="text" placeholder="crypto, nba, ..."
+                   class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 transition">
+          </div>
+          <div>
+            <label class="block text-xs text-gray-500 mb-1">Allow keywords (comma-sep)</label>
+            <input x-model="filterModal.settings.allowKeywords" type="text" placeholder="sports, politics, ..."
+                   class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 transition">
+          </div>
+        </div>
+
+        <div class="flex gap-3 justify-end">
+          <button @click="filterModal.show = false"
+                  class="px-4 py-2 rounded-lg text-gray-400 hover:text-white text-sm border border-gray-700 hover:border-gray-500 transition">
+            Cancel
+          </button>
+          <button @click="saveFilters()"
+                  :disabled="filterModal.saving"
+                  class="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold transition disabled:opacity-40">
+            <span x-text="filterModal.saving ? 'Saving…' : 'Save Filters'"></span>
+          </button>
+        </div>
+        <p x-show="filterModal.error" class="text-xs text-red-400 mt-2" x-text="filterModal.error"></p>
       </div>
     </div>
 
@@ -582,6 +686,14 @@
         redeemMsg: '',
         exitingPos: {},
         addTargetModal: { show: false, address: '', saving: false, error: '' },
+        filterModal: {
+          show: false, address: '', saving: false, error: '',
+          settings: {
+            minPrice: 0.20, maxPrice: 1.0, minSourceTradeSize: 0,
+            multiplier: 0.1, minTradeSize: 1, maxTradeSize: 5,
+            maxPerMarketNotional: 0, blockKeywords: '', allowKeywords: '',
+          },
+        },
         toast: { msg: '', ok: true },
         _toastTimer: null,
 
@@ -749,6 +861,64 @@
 
 
         // ── Copy target management ────────────────────────────────────────
+        openFilterModal(t) {
+          const s = t.settings || {};
+          this.filterModal = {
+            show: true,
+            address: t.address,
+            saving: false,
+            error: '',
+            settings: {
+              minPrice:             s.minPrice             ?? 0.20,
+              maxPrice:             s.maxPrice             ?? 1.0,
+              minSourceTradeSize:   s.minSourceTradeSize   ?? 0,
+              multiplier:           s.multiplier           ?? 0.1,
+              minTradeSize:         s.minTradeSize         ?? 1,
+              maxTradeSize:         s.maxTradeSize         ?? 5,
+              maxPerMarketNotional: s.maxPerMarketNotional ?? 0,
+              blockKeywords: (s.blockKeywords ?? []).join(', '),
+              allowKeywords: (s.allowKeywords ?? []).join(', '),
+            },
+          };
+        },
+
+        async saveFilters() {
+          this.filterModal.saving = true;
+          this.filterModal.error = '';
+          const s = this.filterModal.settings;
+          const toArr = v => String(v).split(',').map(x => x.trim()).filter(Boolean);
+          try {
+            const r = await fetch(`/api/copy-targets/${encodeURIComponent(this.filterModal.address)}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                settings: {
+                  minPrice:             s.minPrice,
+                  maxPrice:             s.maxPrice,
+                  minSourceTradeSize:   s.minSourceTradeSize,
+                  multiplier:           s.multiplier,
+                  minTradeSize:         s.minTradeSize,
+                  maxTradeSize:         s.maxTradeSize,
+                  maxPerMarketNotional: s.maxPerMarketNotional,
+                  blockKeywords:        toArr(s.blockKeywords),
+                  allowKeywords:        toArr(s.allowKeywords),
+                },
+              }),
+            });
+            const d = await r.json();
+            if (r.ok) {
+              this.filterModal.show = false;
+              this.showToast('✅ Filters saved', true);
+            } else {
+              this.filterModal.error = d.error || 'Failed to save';
+            }
+          } catch {
+            this.filterModal.error = 'Network error';
+          } finally {
+            this.filterModal.saving = false;
+          }
+        },
+
         async addTarget() {
           this.addTargetModal.error = '';
           const addr = this.addTargetModal.address.trim().toLowerCase();

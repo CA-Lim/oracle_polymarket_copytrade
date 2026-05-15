@@ -704,7 +704,7 @@ const server = http.createServer(async (req, res) => {
         return json(res, 400, { error: 'Invalid address' });
       }
       try {
-        copyTargetManager.add({
+        await copyTargetManager.add({
           address: addr,
           enabled: true,
           label: body.label || addr.slice(0, 10) + '...',
@@ -712,12 +712,15 @@ const server = http.createServer(async (req, res) => {
           aiReason: 'Added manually',
           addedBy: 'manual',
           settings: {
-            allowKeywords: body.settings?.allowKeywords ?? [...config.filters.allowKeywords],
-            blockKeywords: body.settings?.blockKeywords ?? [...config.filters.blockKeywords],
-            multiplier: body.settings?.multiplier ?? config.trading.positionSizeMultiplier,
-            maxTradeSize: body.settings?.maxTradeSize ?? config.trading.maxTradeSize,
-            minTradeSize: body.settings?.minTradeSize ?? config.trading.minTradeSize,
+            allowKeywords:        body.settings?.allowKeywords        ?? [...config.filters.allowKeywords],
+            blockKeywords:        body.settings?.blockKeywords        ?? [...config.filters.blockKeywords],
+            multiplier:           body.settings?.multiplier           ?? config.trading.positionSizeMultiplier,
+            maxTradeSize:         body.settings?.maxTradeSize         ?? config.trading.maxTradeSize,
+            minTradeSize:         body.settings?.minTradeSize         ?? config.trading.minTradeSize,
             maxPerMarketNotional: body.settings?.maxPerMarketNotional ?? config.risk.maxPerMarketNotional,
+            minPrice:             body.settings?.minPrice             ?? 0.20,
+            maxPrice:             body.settings?.maxPrice             ?? 1.0,
+            minSourceTradeSize:   body.settings?.minSourceTradeSize   ?? 0,
           },
         });
         if (bot) await bot.reloadTargets();
@@ -732,7 +735,7 @@ const server = http.createServer(async (req, res) => {
     const deleteTargetMatch = pathname.match(/^\/api\/copy-targets\/(.+)$/);
     if (req.method === 'DELETE' && deleteTargetMatch) {
       const addr = decodeURIComponent(deleteTargetMatch[1]).toLowerCase();
-      const removed = copyTargetManager.remove(addr);
+      const removed = await copyTargetManager.remove(addr);
       if (!removed) return json(res, 404, { error: 'Address not found' });
       if (bot) await bot.reloadTargets();
       broadcastSnapshot();
@@ -744,7 +747,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'PUT' && updateTargetMatch) {
       const addr = decodeURIComponent(updateTargetMatch[1]).toLowerCase();
       const body = await readBody(req);
-      const updated = copyTargetManager.update(addr, body);
+      const updated = await copyTargetManager.update(addr, body);
       if (!updated) return json(res, 404, { error: 'Address not found' });
       if (bot) await bot.reloadTargets();
       broadcastSnapshot();
@@ -959,6 +962,7 @@ setInterval(() => fetchAccountSummary().catch(console.error), 5 * 60 * 1000);
 // Load persisted trade history + warm account summary before accepting connections
 initLogger();
 await initDb();
+await copyTargetManager.init();
 await loadTradeHistory();
 fetchAccountSummary().catch(console.error);
 
