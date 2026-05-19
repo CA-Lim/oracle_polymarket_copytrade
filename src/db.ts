@@ -62,6 +62,18 @@ CREATE TABLE IF NOT EXISTS copy_targets (
   settings         JSONB   NOT NULL DEFAULT '{}'
 );
 
+CREATE TABLE IF NOT EXISTS daily_balance_snapshots (
+  id              BIGSERIAL     PRIMARY KEY,
+  snapshot_date   DATE          NOT NULL UNIQUE,
+  usdc_balance    NUMERIC(18,6) NOT NULL DEFAULT 0,
+  pusd_balance    NUMERIC(18,6) NOT NULL DEFAULT 0,
+  pol_balance     NUMERIC(18,6) NOT NULL DEFAULT 0,
+  positions_value NUMERIC(18,6) NOT NULL DEFAULT 0,
+  total_portfolio NUMERIC(18,6) NOT NULL DEFAULT 0,
+  captured_at     TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS dbs_date_idx ON daily_balance_snapshots (snapshot_date DESC);
+
 CREATE OR REPLACE VIEW pnl_summary AS
 SELECT
   t.condition_id,

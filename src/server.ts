@@ -9,7 +9,8 @@ import { PolymarketCopyBot } from './index.js';
 import { config } from './config.js';
 import { copyTargetManager } from './copy-target-manager.js';
 import { TradeExecutor } from './trader.js';
-import { initDb, initLogger, insertTrade, insertRedeem } from './db.js';
+import { initDb, initLogger, insertTrade, insertRedeem, getPool } from './db.js';
+import cron from 'node-cron';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DASHBOARD_PATH   = path.join(__dirname, '..', 'dashboard', 'index.html');
@@ -383,6 +384,53 @@ async function getPositions(): Promise<any[]> {
     });
   } catch {
     return [];
+  }
+}
+
+// ─── Daily balance snapshot ───────────────────────────────────────────────────
+
+async function captureBalanceSnapshot(): Promise<void> {
+  const pool = getPool();
+  if (!pool) {
+    console.warn('⚠️  Daily snapshot skipped — no DB connection');
+    return;
+  }
+  console.log('📸 Capturing daily balance snapshot…');
+  try {
+    const balances = await getBalances();
+    const usdcBal  = parseFloat(balances.usdc) || 0;
+    const pusdBal  = parseFloat(balances.pusd) || 0;
+    const polBal   = parseFloat(balances.pol)  || 0;
+
+    const positions = await getPositions();
+    const posValue  = positions.reduce(
+      (sum: number, p: any) => sum + (parseFloat(p.currentValue ?? 0) || 0),
+      0
+    );
+
+    const snapshotDate = new Date().toISOString().slice(0, 10);
+
+    await pool.query(
+      `INSERT INTO daily_balance_snapshots
+         (snapshot_date, usdc_balance, pusd_balance, pol_balance, positions_value, total_portfolio)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (snapshot_date) DO UPDATE SET
+         usdc_balance    = EXCLUDED.usdc_balance,
+         pusd_balance    = EXCLUDED.pusd_balance,
+         pol_balance     = EXCLUDED.pol_balance,
+         positions_value = EXCLUDED.positions_value,
+         total_portfolio = EXCLUDED.total_portfolio,
+         captured_at     = NOW()`,
+      [snapshotDate, usdcBal, pusdBal, polBal, posValue, pusdBal + posValue]
+    );
+
+    console.log(
+      `✅ Daily snapshot saved — date: ${snapshotDate}, ` +
+      `pUSD: $${pusdBal.toFixed(2)}, positions: $${posValue.toFixed(2)}, ` +
+      `portfolio: $${(pusdBal + posValue).toFixed(2)}`
+    );
+  } catch (e: any) {
+    console.error('❌ Daily snapshot failed:', e.message);
   }
 }
 
@@ -824,6 +872,104 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { ok: true, txHash: tx.hash, received });
     }
 
+    // GET /api/balance-snapshots
+    if (req.method === 'GET' && pathname === '/api/balance-snapshots') {
+      const pool = getPool();
+      if (!pool) return json(res, 503, { error: 'Database not available' });
+      const days = Math.min(parseInt(url.searchParams.get('days') || '90'), 365);
+      const result = await pool.query(
+        `SELECT snapshot_date, usdc_balance, pusd_balance, pol_balance,
+                positions_value, total_portfolio, captured_at
+         FROM daily_balance_snapshots
+         ORDER BY snapshot_date DESC
+         LIMIT $1`,
+        [days]
+      );
+      return json(res, 200, { snapshots: result.rows });
+    }
+
+    // GET /api/trade-summary
+    if (req.method === 'GET' && pathname === '/api/trade-summary') {
+      const pool = getPool();
+      if (!pool) return json(res, 503, { error: 'Database not available' });
+      const days = parseInt(url.searchParams.get('days') || '30');
+
+      const livePositions = await getPositions();
+      const unrealizedByCondition = new Map<string, number>();
+      for (const p of livePositions) {
+        if (p.conditionId) {
+          unrealizedByCondition.set(p.conditionId, parseFloat(p.currentValue ?? 0) || 0);
+        }
+      }
+
+      const result = await pool.query(
+        `WITH trade_costs AS (
+           SELECT source_address, condition_id,
+                  DATE(ts AT TIME ZONE 'UTC') AS trade_date,
+                  SUM(COALESCE(entry_cost, 0)) AS total_invested,
+                  COUNT(*) AS buy_count
+           FROM trades
+           WHERE source_address <> '' AND condition_id <> ''
+             AND side = 'BUY' AND status = 'filled'
+             AND ts >= NOW() - ($1 || ' days')::INTERVAL
+           GROUP BY source_address, condition_id, DATE(ts AT TIME ZONE 'UTC')
+         ),
+         redeem_totals AS (
+           SELECT condition_id, SUM(received) AS total_received
+           FROM redeems GROUP BY condition_id
+         ),
+         classified AS (
+           SELECT tc.source_address, tc.trade_date, tc.condition_id,
+                  tc.total_invested, tc.buy_count,
+                  COALESCE(rt.total_received, 0) AS total_received,
+                  CASE WHEN rt.condition_id IS NULL THEN 'pending'
+                       WHEN rt.total_received > tc.total_invested THEN 'win'
+                       ELSE 'loss' END AS result,
+                  CASE WHEN rt.condition_id IS NULL THEN 0
+                       ELSE rt.total_received - tc.total_invested END AS realized_pnl
+           FROM trade_costs tc
+           LEFT JOIN redeem_totals rt ON rt.condition_id = tc.condition_id
+         )
+         SELECT source_address, trade_date,
+                SUM(buy_count)                                    AS trade_count,
+                COUNT(*) FILTER (WHERE result = 'win')            AS win_count,
+                COUNT(*) FILTER (WHERE result = 'loss')           AS loss_count,
+                COUNT(*) FILTER (WHERE result = 'pending')        AS pending_count,
+                SUM(total_invested)                               AS total_invested,
+                SUM(CASE WHEN result <> 'pending' THEN total_received ELSE 0 END) AS total_received,
+                SUM(CASE WHEN result <> 'pending' THEN realized_pnl ELSE 0 END)   AS realized_pnl,
+                ARRAY_AGG(condition_id) FILTER (WHERE result = 'pending') AS pending_condition_ids
+         FROM classified
+         GROUP BY source_address, trade_date
+         ORDER BY trade_date DESC, source_address`,
+        [days]
+      );
+
+      const rows = result.rows.map((row: any) => {
+        let unrealizedValue = 0;
+        for (const cid of (row.pending_condition_ids ?? [])) {
+          unrealizedValue += unrealizedByCondition.get(cid) ?? 0;
+        }
+        return {
+          source_address:   row.source_address,
+          trade_date:       row.trade_date,
+          trade_count:      Number(row.trade_count),
+          win_count:        Number(row.win_count),
+          loss_count:       Number(row.loss_count),
+          pending_count:    Number(row.pending_count),
+          total_invested:   parseFloat(row.total_invested),
+          total_received:   parseFloat(row.total_received),
+          realized_pnl:     parseFloat(row.realized_pnl),
+          unrealized_value: unrealizedValue,
+        };
+      });
+
+      const labelMap = Object.fromEntries(
+        copyTargetManager.getAll().map((t: any) => [t.address, t.label])
+      );
+      return json(res, 200, { rows, labelMap });
+    }
+
     return json(res, 404, { error: 'Not found' });
   } catch (e: any) {
     return json(res, 500, { error: e.message });
@@ -969,6 +1115,9 @@ setInterval(broadcastSnapshot, 5000);
 // Refresh account summary every 5 minutes
 setInterval(() => fetchAccountSummary().catch(console.error), 5 * 60 * 1000);
 
+// Daily balance snapshot at 16:00 UTC (= midnight UTC+8)
+cron.schedule('0 16 * * *', () => captureBalanceSnapshot().catch(console.error), { timezone: 'UTC' });
+
 // ─── Start ────────────────────────────────────────────────────────────────────
 
 // Load persisted trade history + warm account summary before accepting connections
@@ -977,6 +1126,13 @@ await initDb();
 await copyTargetManager.init();
 await loadTradeHistory();
 fetchAccountSummary().catch(console.error);
+
+// Seed today's snapshot on startup if not yet captured
+getPool()?.query(
+  'SELECT 1 FROM daily_balance_snapshots WHERE snapshot_date = CURRENT_DATE'
+).then(r => {
+  if (r.rows.length === 0) captureBalanceSnapshot().catch(console.error);
+}).catch(() => {});
 
 server.listen(PORT, () => {
   console.log(`\n📊 Dashboard: http://localhost:${PORT}`);

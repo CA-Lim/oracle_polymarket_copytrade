@@ -371,6 +371,129 @@
       </div>
     </div>
 
+    <!-- ── DAILY BALANCE HISTORY ─────────────────────────────────────────── -->
+    <div class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+      <div class="px-4 py-3 border-b border-gray-800 flex items-center justify-between">
+        <h2 class="font-semibold text-white">Daily Balance History</h2>
+        <span class="text-xs text-gray-500">Snapshots at 12am UTC+8 · Last 90 days</span>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full">
+          <thead>
+            <tr class="text-xs text-gray-500 bg-gray-950/40">
+              <th class="px-4 py-2.5 text-left font-medium">Date</th>
+              <th class="px-4 py-2.5 text-right font-medium">pUSD</th>
+              <th class="px-4 py-2.5 text-right font-medium">USDC.e</th>
+              <th class="px-4 py-2.5 text-right font-medium">POL</th>
+              <th class="px-4 py-2.5 text-right font-medium">Positions Value</th>
+              <th class="px-4 py-2.5 text-right font-medium">Total Portfolio</th>
+              <th class="px-4 py-2.5 text-right font-medium">Day Change</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-if="!balanceSnapshots || balanceSnapshots.length === 0">
+              <tr>
+                <td colspan="7" class="px-4 py-10 text-center text-gray-600">
+                  No snapshots yet — first one captured at 12am UTC+8
+                </td>
+              </tr>
+            </template>
+            <template x-for="(snap, idx) in (balanceSnapshots ?? [])" :key="snap.snapshot_date">
+              <tr class="border-t border-gray-800/60 hover:bg-gray-800/20 transition-colors">
+                <td class="px-4 py-2.5 text-gray-300 font-mono whitespace-nowrap" x-text="snap.snapshot_date"></td>
+                <td class="px-4 py-2.5 text-right text-green-400 font-mono"
+                    x-text="'$' + Number(snap.pusd_balance).toFixed(2)"></td>
+                <td class="px-4 py-2.5 text-right text-gray-400 font-mono"
+                    x-text="'$' + Number(snap.usdc_balance).toFixed(2)"></td>
+                <td class="px-4 py-2.5 text-right text-gray-400 font-mono"
+                    x-text="Number(snap.pol_balance).toFixed(4)"></td>
+                <td class="px-4 py-2.5 text-right text-gray-300 font-mono"
+                    x-text="'$' + Number(snap.positions_value).toFixed(2)"></td>
+                <td class="px-4 py-2.5 text-right text-white font-semibold font-mono"
+                    x-text="'$' + Number(snap.total_portfolio).toFixed(2)"></td>
+                <td class="px-4 py-2.5 text-right font-mono font-semibold">
+                  <template x-if="balanceSnapshots[idx + 1]">
+                    <span :class="(Number(snap.total_portfolio) - Number(balanceSnapshots[idx+1].total_portfolio)) >= 0 ? 'text-green-400' : 'text-red-400'"
+                          x-text="((Number(snap.total_portfolio) - Number(balanceSnapshots[idx+1].total_portfolio)) >= 0 ? '+$' : '-$') + Math.abs(Number(snap.total_portfolio) - Number(balanceSnapshots[idx+1].total_portfolio)).toFixed(2)">
+                    </span>
+                  </template>
+                  <template x-if="!balanceSnapshots[idx + 1]">
+                    <span class="text-gray-600">—</span>
+                  </template>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ── TRADE SUMMARY BY WALLET ────────────────────────────────────────── -->
+    <div class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+      <div class="px-4 py-3 border-b border-gray-800 flex items-center justify-between">
+        <h2 class="font-semibold text-white">Trade Summary by Wallet</h2>
+        <div class="flex items-center gap-3">
+          <select x-model="tradeSummaryDays" @change="loadTradeSummary()"
+                  class="bg-gray-800 border border-gray-700 rounded text-xs text-gray-300 px-2 py-1 focus:outline-none">
+            <option value="7">7 days</option>
+            <option value="30">30 days</option>
+            <option value="90">90 days</option>
+          </select>
+          <span class="text-xs text-gray-500" x-text="'(' + (tradeSummaryRows?.length ?? 0) + ' rows)'"></span>
+        </div>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full">
+          <thead>
+            <tr class="text-xs text-gray-500 bg-gray-950/40">
+              <th class="px-4 py-2.5 text-left font-medium">Date</th>
+              <th class="px-4 py-2.5 text-left font-medium">Wallet</th>
+              <th class="px-4 py-2.5 text-right font-medium">Trades</th>
+              <th class="px-4 py-2.5 text-right font-medium">Won</th>
+              <th class="px-4 py-2.5 text-right font-medium">Lost</th>
+              <th class="px-4 py-2.5 text-right font-medium">Pending</th>
+              <th class="px-4 py-2.5 text-right font-medium">Invested</th>
+              <th class="px-4 py-2.5 text-right font-medium">Realized P&amp;L</th>
+              <th class="px-4 py-2.5 text-right font-medium">Positions Value</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-if="tradeSummaryLoading">
+              <tr><td colspan="9" class="px-4 py-10 text-center text-gray-600">Loading…</td></tr>
+            </template>
+            <template x-if="!tradeSummaryLoading && (!tradeSummaryRows || tradeSummaryRows.length === 0)">
+              <tr><td colspan="9" class="px-4 py-10 text-center text-gray-600">No trade data in this period</td></tr>
+            </template>
+            <template x-for="row in (tradeSummaryRows ?? [])" :key="row.source_address + String(row.trade_date)">
+              <tr class="border-t border-gray-800/60 hover:bg-gray-800/20 transition-colors">
+                <td class="px-4 py-2.5 text-gray-400 font-mono whitespace-nowrap"
+                    x-text="typeof row.trade_date === 'string' ? row.trade_date.slice(0,10) : new Date(row.trade_date).toISOString().slice(0,10)"></td>
+                <td class="px-4 py-2.5">
+                  <span class="text-indigo-400 text-xs font-mono"
+                        :title="row.source_address"
+                        x-text="tradeSummaryLabels[row.source_address] || (row.source_address.slice(0,6)+'…'+row.source_address.slice(-4))">
+                  </span>
+                </td>
+                <td class="px-4 py-2.5 text-right text-gray-300 font-mono" x-text="row.trade_count"></td>
+                <td class="px-4 py-2.5 text-right text-green-400 font-semibold" x-text="row.win_count"></td>
+                <td class="px-4 py-2.5 text-right text-red-400 font-semibold" x-text="row.loss_count"></td>
+                <td class="px-4 py-2.5 text-right text-yellow-500" x-text="row.pending_count"></td>
+                <td class="px-4 py-2.5 text-right text-gray-400 font-mono"
+                    x-text="'$' + Number(row.total_invested).toFixed(2)"></td>
+                <td class="px-4 py-2.5 text-right font-semibold font-mono"
+                    :class="row.realized_pnl >= 0 ? 'text-green-400' : 'text-red-400'"
+                    x-text="(row.realized_pnl >= 0 ? '+$' : '-$') + Math.abs(row.realized_pnl).toFixed(2)">
+                </td>
+                <td class="px-4 py-2.5 text-right text-gray-400 font-mono"
+                    x-text="row.unrealized_value > 0 ? '$' + Number(row.unrealized_value).toFixed(2) : '—'">
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
     <!-- ── COPY TARGETS ─────────────────────────────────────────────────── -->
     <div class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
       <div class="px-4 py-3 border-b border-gray-800 flex items-center justify-between">
@@ -704,6 +827,11 @@
         },
         toast: { msg: '', ok: true },
         _toastTimer: null,
+        balanceSnapshots: [],
+        tradeSummaryRows: [],
+        tradeSummaryLabels: {},
+        tradeSummaryDays: '30',
+        tradeSummaryLoading: false,
 
         // ── Computed ──────────────────────────────────────────────────────
         get shortWallet() {
@@ -730,6 +858,32 @@
         // ── Init ──────────────────────────────────────────────────────────
         init() {
           this.connect();
+          this.loadBalanceSnapshots();
+          this.loadTradeSummary();
+        },
+
+        async loadBalanceSnapshots() {
+          try {
+            const r = await fetch('/api/balance-snapshots?days=90');
+            if (r.ok) {
+              const d = await r.json();
+              this.balanceSnapshots = d.snapshots ?? [];
+            }
+          } catch {}
+        },
+
+        async loadTradeSummary() {
+          this.tradeSummaryLoading = true;
+          try {
+            const r = await fetch(`/api/trade-summary?days=${this.tradeSummaryDays}`);
+            if (r.ok) {
+              const d = await r.json();
+              this.tradeSummaryRows   = d.rows ?? [];
+              this.tradeSummaryLabels = d.labelMap ?? {};
+            }
+          } catch {} finally {
+            this.tradeSummaryLoading = false;
+          }
         },
 
         // ── WebSocket ─────────────────────────────────────────────────────
