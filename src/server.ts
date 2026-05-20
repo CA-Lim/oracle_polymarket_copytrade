@@ -421,13 +421,13 @@ async function captureBalanceSnapshot(): Promise<void> {
          positions_value = EXCLUDED.positions_value,
          total_portfolio = EXCLUDED.total_portfolio,
          captured_at     = NOW()`,
-      [snapshotDate, usdcBal, pusdBal, polBal, posValue, pusdBal + posValue]
+      [snapshotDate, usdcBal, pusdBal, polBal, posValue, usdcBal + pusdBal + posValue]
     );
 
     console.log(
       `✅ Daily snapshot saved — date: ${snapshotDate}, ` +
-      `pUSD: $${pusdBal.toFixed(2)}, positions: $${posValue.toFixed(2)}, ` +
-      `portfolio: $${(pusdBal + posValue).toFixed(2)}`
+      `pUSD: $${pusdBal.toFixed(2)}, USDC: $${usdcBal.toFixed(2)}, positions: $${posValue.toFixed(2)}, ` +
+      `portfolio: $${(usdcBal + pusdBal + posValue).toFixed(2)}`
     );
   } catch (e: any) {
     console.error('❌ Daily snapshot failed:', e.message);
