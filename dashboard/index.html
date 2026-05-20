@@ -53,6 +53,12 @@
         <span class="text-gray-600">|</span>
         <span class="text-gray-400">USDC.e</span>
         <span class="text-gray-300 font-semibold" x-text="data.balances?.usdc ? '$' + data.balances.usdc : '—'"></span>
+        <button x-show="parseFloat(data.balances?.usdc ?? '0') > 0"
+                @click="openWrapModal"
+                class="px-2 py-0.5 rounded text-xs font-semibold bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 border border-blue-600/40 transition"
+                title="Convert USDC.e to pUSD">
+          → pUSD
+        </button>
       </div>
       <!-- ws indicator -->
       <span class="w-2 h-2 rounded-full" :class="wsConnected ? 'bg-green-500' : 'bg-gray-600'" :title="wsConnected ? 'Live' : 'Reconnecting…'"></span>
@@ -84,6 +90,40 @@
        class="fixed bottom-20 right-6 z-50 px-5 py-3 rounded-xl border text-sm font-semibold shadow-xl max-w-sm"
        :class="toast.ok ? 'bg-green-900 border-green-700 text-green-300' : 'bg-red-900 border-red-700 text-red-300'"
        x-text="toast.msg">
+  </div>
+
+  <!-- ── WRAP TO PUSD MODAL ───────────────────────────────────────────── -->
+  <div x-show="wrapModal.show" x-transition
+       class="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+       @click.self="wrapModal.show = false">
+    <div class="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
+      <h3 class="text-white font-bold text-base mb-1">Convert USDC.e → pUSD</h3>
+      <p class="text-gray-400 text-xs mb-4">Available: <span class="text-gray-200 font-semibold" x-text="'$' + (data.balances?.usdc ?? '0')"></span></p>
+
+      <div class="flex gap-2 mb-4">
+        <input x-model="wrapModal.amount" type="number" min="0.01" step="0.01"
+               placeholder="Amount"
+               class="flex-1 bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500" />
+        <button @click="wrapModal.amount = data.balances?.usdc ?? '0'"
+                class="px-3 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-300 text-xs font-semibold transition">
+          Max
+        </button>
+      </div>
+
+      <p x-show="wrapModal.error" class="text-red-400 text-xs mb-3" x-text="wrapModal.error"></p>
+
+      <div class="flex gap-2">
+        <button @click="wrapModal.show = false"
+                class="flex-1 px-4 py-2 rounded-lg border border-gray-600 text-gray-400 hover:text-white text-sm font-semibold transition">
+          Cancel
+        </button>
+        <button @click="doWrap"
+                :disabled="wrapModal.loading || !wrapModal.amount"
+                class="flex-1 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold transition disabled:opacity-40 disabled:cursor-not-allowed">
+          <span x-text="wrapModal.loading ? 'Converting…' : 'Convert'"></span>
+        </button>
+      </div>
+    </div>
   </div>
 
   <!-- ── LOW BALANCE WARNING ───────────────────────────────────────────── -->
@@ -827,6 +867,7 @@
         },
         toast: { msg: '', ok: true },
         _toastTimer: null,
+        wrapModal: { show: false, amount: '', loading: false, error: '' },
         balanceSnapshots: [],
         tradeSummaryRows: [],
         tradeSummaryLabels: {},
@@ -987,6 +1028,36 @@
           } finally {
             this.redeeming[pos.conditionId] = false;
             setTimeout(() => this.redeemMsg = '', 8000);
+          }
+        },
+
+        // ── Wrap USDC.e → pUSD ───────────────────────────────────────────
+        openWrapModal() {
+          this.wrapModal = { show: true, amount: this.data.balances?.usdc ?? '', loading: false, error: '' };
+        },
+        async doWrap() {
+          if (this.wrapModal.loading) return;
+          const amount = parseFloat(this.wrapModal.amount);
+          if (!amount || amount <= 0) { this.wrapModal.error = 'Enter a valid amount'; return; }
+          this.wrapModal.loading = true;
+          this.wrapModal.error = '';
+          try {
+            const r = await fetch('/api/wrap-to-pusd', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ amount: String(amount) }),
+            });
+            const d = await r.json();
+            if (r.ok) {
+              this.wrapModal.show = false;
+              this.showToast(`✅ Converted $${Number(d.amount).toFixed(2)} USDC.e → pUSD`, true);
+            } else {
+              this.wrapModal.error = d.error || 'Conversion failed';
+            }
+          } catch {
+            this.wrapModal.error = 'Network error';
+          } finally {
+            this.wrapModal.loading = false;
           }
         },
 

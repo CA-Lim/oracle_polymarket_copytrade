@@ -872,6 +872,68 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { ok: true, txHash: tx.hash, received });
     }
 
+    // POST /api/wrap-to-pusd  (body: { amount?: number } — defaults to full USDC.e balance)
+    if (req.method === 'POST' && pathname === '/api/wrap-to-pusd') {
+      const body = await readBody(req);
+
+      const ONRAMP_ABI = [
+        'function wrap(address _asset, address _to, uint256 _amount) external',
+      ];
+      const ERC20_WRAP_ABI = [
+        'function balanceOf(address) view returns (uint256)',
+        'function allowance(address owner, address spender) view returns (uint256)',
+        'function approve(address spender, uint256 amount) returns (bool)',
+      ];
+
+      const provider = new ethers.providers.StaticJsonRpcProvider(config.rpcUrl, { chainId: 137, name: 'matic' });
+      const wallet   = new ethers.Wallet(config.privateKey, provider);
+      const usdc     = new ethers.Contract(config.contracts.usdc, ERC20_WRAP_ABI, wallet);
+      const onramp   = new ethers.Contract(config.contracts.onramp, ONRAMP_ABI, wallet);
+
+      const rawBalance = await usdc.balanceOf(wallet.address);
+      if (rawBalance.isZero()) {
+        return json(res, 400, { error: 'No USDC.e balance to convert' });
+      }
+
+      // Use requested amount or full balance; cap at available balance
+      let amountBn: ethers.BigNumber;
+      if (body.amount && parseFloat(body.amount) > 0) {
+        const requested = ethers.utils.parseUnits(String(body.amount), 6);
+        amountBn = requested.lt(rawBalance) ? requested : rawBalance;
+      } else {
+        amountBn = rawBalance;
+      }
+
+      const feeData  = await provider.getFeeData();
+      const minPri   = ethers.utils.parseUnits('50', 'gwei');
+      const priority = (feeData.maxPriorityFeePerGas ?? minPri).lt(minPri) ? minPri : feeData.maxPriorityFeePerGas!;
+      const block    = await provider.getBlock('latest');
+      const baseFee  = block.baseFeePerGas ?? ethers.utils.parseUnits('100', 'gwei');
+      const maxFee   = baseFee.mul(2).add(priority);
+      const gas      = { maxPriorityFeePerGas: priority, maxFeePerGas: maxFee };
+
+      // Approve onramp if allowance is insufficient
+      const allowance = await usdc.allowance(wallet.address, config.contracts.onramp);
+      if (allowance.lt(amountBn)) {
+        const approveTx = await usdc.approve(config.contracts.onramp, ethers.constants.MaxUint256, gas);
+        await approveTx.wait();
+      }
+
+      const wrapTx = await onramp.wrap(config.contracts.usdc, wallet.address, amountBn, await (async () => {
+        const fd = await provider.getFeeData();
+        const bl = await provider.getBlock('latest');
+        const bf = bl.baseFeePerGas ?? ethers.utils.parseUnits('100', 'gwei');
+        const pr = (fd.maxPriorityFeePerGas ?? minPri).lt(minPri) ? minPri : fd.maxPriorityFeePerGas!;
+        return { maxPriorityFeePerGas: pr, maxFeePerGas: bf.mul(2).add(pr) };
+      })());
+      await wrapTx.wait();
+
+      const amount = parseFloat(ethers.utils.formatUnits(amountBn, 6));
+      console.log(`💱 Wrapped $${amount.toFixed(2)} USDC.e → pUSD (tx: ${wrapTx.hash})`);
+      broadcastSnapshot();
+      return json(res, 200, { ok: true, txHash: wrapTx.hash, amount });
+    }
+
     // GET /api/balance-snapshots
     if (req.method === 'GET' && pathname === '/api/balance-snapshots') {
       const pool = getPool();
