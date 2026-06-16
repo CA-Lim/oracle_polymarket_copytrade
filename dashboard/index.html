@@ -786,6 +786,28 @@
         <span x-show="saveError" class="text-red-400 text-xs" x-text="saveError"></span>
       </div>
 
+      <!-- Auto-convert USDC.e -> pUSD -->
+      <div class="mt-4 pt-4 border-t border-gray-800 space-y-3">
+        <p class="text-xs font-medium text-gray-400">Auto-Convert USDC.e → pUSD <span class="text-gray-600 font-normal">(used automatically when a trade needs more pUSD than is on hand)</span></p>
+        <div class="flex flex-wrap items-end gap-4">
+          <label class="flex items-center gap-2 text-sm text-gray-300 select-none cursor-pointer">
+            <input type="checkbox" x-model="settings.autoConvertEnabled"
+                   class="rounded bg-gray-800 border-gray-700 text-blue-600 focus:ring-blue-500/30">
+            Enabled
+          </label>
+          <div>
+            <label class="block text-xs text-gray-500 mb-1.5">Reserve — never convert below ($)</label>
+            <input x-model.number="settings.autoConvertReserveUsdc" type="number" min="0" step="1"
+                   class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm w-32 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30 transition">
+          </div>
+          <div>
+            <label class="block text-xs text-gray-500 mb-1.5">Max per trade ($)</label>
+            <input x-model.number="settings.autoConvertMaxPerTrade" type="number" min="0" step="1"
+                   class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm w-32 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30 transition">
+          </div>
+        </div>
+      </div>
+
       <!-- Market keyword filters -->
       <div class="mt-4 pt-4 border-t border-gray-800 space-y-3">
         <p class="text-xs font-medium text-gray-400">Market Keyword Filters <span class="text-gray-600 font-normal">(case-insensitive, comma-separated)</span></p>
@@ -846,7 +868,7 @@
           config: {},
           copyTargets: [],
         },
-        settings: { minTradeSize: 1, maxTradeSize: 5, positionMultiplier: 0.1, maxPerMarketNotional: 0, maxSessionNotional: 0, blockKeywords: '', allowKeywords: '' },
+        settings: { minTradeSize: 1, maxTradeSize: 5, positionMultiplier: 0.1, maxPerMarketNotional: 0, maxSessionNotional: 0, blockKeywords: '', allowKeywords: '', autoConvertEnabled: true, autoConvertReserveUsdc: 0, autoConvertMaxPerTrade: 50 },
         saved: false,
         saveError: '',
         wsConnected: false,
@@ -946,6 +968,9 @@
                 this.settings.maxSessionNotional   = msg.config.maxSessionNotional   ?? 0;
                 this.settings.blockKeywords = (msg.config.blockKeywords ?? []).join(', ');
                 this.settings.allowKeywords = (msg.config.allowKeywords ?? []).join(', ');
+                this.settings.autoConvertEnabled = msg.config.autoConvertEnabled ?? true;
+                this.settings.autoConvertReserveUsdc = msg.config.autoConvertReserveUsdc ?? 0;
+                this.settings.autoConvertMaxPerTrade = msg.config.autoConvertMaxPerTrade ?? 50;
               }
               this.lastUpdate = new Date().toLocaleTimeString();
             } else if (msg.type === 'status') {
@@ -982,20 +1007,31 @@
         async saveSettings() {
           this.saveError = '';
           try {
-            const r = await fetch('/api/settings', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                minTradeSize: String(this.settings.minTradeSize),
-                maxTradeSize: String(this.settings.maxTradeSize),
-                positionMultiplier: String(this.settings.positionMultiplier),
-                maxPerMarketNotional: String(this.settings.maxPerMarketNotional),
-                maxSessionNotional:   String(this.settings.maxSessionNotional),
-                blockKeywords: this.settings.blockKeywords,
-                allowKeywords: this.settings.allowKeywords,
+            const [r, r2] = await Promise.all([
+              fetch('/api/settings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  minTradeSize: String(this.settings.minTradeSize),
+                  maxTradeSize: String(this.settings.maxTradeSize),
+                  positionMultiplier: String(this.settings.positionMultiplier),
+                  maxPerMarketNotional: String(this.settings.maxPerMarketNotional),
+                  maxSessionNotional:   String(this.settings.maxSessionNotional),
+                  blockKeywords: this.settings.blockKeywords,
+                  allowKeywords: this.settings.allowKeywords,
+                }),
               }),
-            });
-            if (r.ok) {
+              fetch('/api/auto-convert-settings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  enabled: this.settings.autoConvertEnabled,
+                  reserveUsdc: this.settings.autoConvertReserveUsdc,
+                  maxPerTrade: this.settings.autoConvertMaxPerTrade,
+                }),
+              }),
+            ]);
+            if (r.ok && r2.ok) {
               this.saved = true;
               setTimeout(() => { this.saved = false; }, 2500);
             } else {

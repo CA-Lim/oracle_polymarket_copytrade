@@ -1,5 +1,6 @@
 import pg from 'pg';
 import type { CopyTarget } from './copy-target-manager.js';
+import { config } from './config.js';
 
 const { Pool } = pg;
 
@@ -74,6 +75,14 @@ CREATE TABLE IF NOT EXISTS daily_balance_snapshots (
 );
 CREATE INDEX IF NOT EXISTS dbs_date_idx ON daily_balance_snapshots (snapshot_date DESC);
 
+CREATE TABLE IF NOT EXISTS auto_convert_settings (
+  id            BOOLEAN       PRIMARY KEY DEFAULT true CHECK (id),
+  enabled       BOOLEAN       NOT NULL DEFAULT true,
+  reserve_usdc  NUMERIC(18,6) NOT NULL DEFAULT 0,
+  max_per_trade NUMERIC(18,6) NOT NULL DEFAULT 50,
+  updated_at    TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
+
 CREATE OR REPLACE VIEW pnl_summary AS
 SELECT
   t.condition_id,
@@ -132,6 +141,7 @@ export async function initDb(): Promise<void> {
     await pool.query('SELECT 1');
     await pool.query(DDL);
     process.stdout.write('🗄️  Postgres connected and schema ready\n');
+    await loadAutoConvertSettings();
   } catch (e: any) {
     process.stderr.write(`⚠️  Postgres init failed: ${e.message} — continuing without DB\n`);
     pool = null;
@@ -140,6 +150,51 @@ export async function initDb(): Promise<void> {
 
 export function getPool(): InstanceType<typeof Pool> | null {
   return pool;
+}
+
+// ── Auto-convert (USDC.e → pUSD) settings ────────────────────────────────────
+// Single global row in Postgres, editable from the dashboard. Mirrored onto
+// config.autoConvert in memory so trader.ts always reads the live value.
+
+export async function loadAutoConvertSettings(): Promise<void> {
+  if (!pool) return;
+  const result = await pool.query(
+    'SELECT enabled, reserve_usdc, max_per_trade FROM auto_convert_settings WHERE id = true'
+  );
+  if (result.rows.length === 0) {
+    // Seed the row from current (env-derived) defaults so the dashboard has something to show.
+    await pool.query(
+      `INSERT INTO auto_convert_settings (id, enabled, reserve_usdc, max_per_trade)
+       VALUES (true, $1, $2, $3)`,
+      [config.autoConvert.enabled, config.autoConvert.reserveUsdc, config.autoConvert.maxPerTrade]
+    );
+    return;
+  }
+  const row = result.rows[0];
+  config.autoConvert.enabled = row.enabled;
+  config.autoConvert.reserveUsdc = Number(row.reserve_usdc);
+  config.autoConvert.maxPerTrade = Number(row.max_per_trade);
+}
+
+export async function saveAutoConvertSettings(settings: {
+  enabled: boolean;
+  reserveUsdc: number;
+  maxPerTrade: number;
+}): Promise<void> {
+  config.autoConvert.enabled = settings.enabled;
+  config.autoConvert.reserveUsdc = settings.reserveUsdc;
+  config.autoConvert.maxPerTrade = settings.maxPerTrade;
+  if (!pool) return; // no DB configured — in-memory only for this process lifetime
+  await pool.query(
+    `INSERT INTO auto_convert_settings (id, enabled, reserve_usdc, max_per_trade, updated_at)
+     VALUES (true, $1, $2, $3, NOW())
+     ON CONFLICT (id) DO UPDATE SET
+       enabled = EXCLUDED.enabled,
+       reserve_usdc = EXCLUDED.reserve_usdc,
+       max_per_trade = EXCLUDED.max_per_trade,
+       updated_at = NOW()`,
+    [settings.enabled, settings.reserveUsdc, settings.maxPerTrade]
+  );
 }
 
 export function insertTrade(record: {

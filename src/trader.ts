@@ -558,10 +558,17 @@ export class TradeExecutor {
       const safeAmount = (Math.floor(requiredAmount * 1e6) / 1e6).toFixed(6);
       const required = ethers.utils.parseUnits(safeAmount, decimals);
 
-      const balance = await pusd.balanceOf(this.wallet.address);
+      let balance = await pusd.balanceOf(this.wallet.address);
       if (balance.lt(required)) {
-        const bal = ethers.utils.formatUnits(balance, decimals);
-        throw new Error(`not enough pUSD balance (${bal} < required ${requiredAmount})`);
+        const shortfall = parseFloat(ethers.utils.formatUnits(required.sub(balance), decimals));
+        if (config.autoConvert.enabled) {
+          await this.autoConvertUsdceToPusd(shortfall);
+          balance = await pusd.balanceOf(this.wallet.address);
+        }
+        if (balance.lt(required)) {
+          const bal = ethers.utils.formatUnits(balance, decimals);
+          throw new Error(`not enough pUSD balance (${bal} < required ${requiredAmount})`);
+        }
       }
 
       const allowanceEx = await pusd.allowance(this.wallet.address, exchangeAddress);
@@ -575,8 +582,79 @@ export class TradeExecutor {
       throw error;
     }
   }
-  
-  
+
+  /**
+   * Auto-convert USDC.e → pUSD to cover a pUSD shortfall, bounded by
+   * config.autoConvert.maxPerTrade and config.autoConvert.reserveUsdc so the
+   * bot can never sweep the whole USDC.e balance into a single trade.
+   */
+  private async autoConvertUsdceToPusd(shortfall: number): Promise<void> {
+    const usdce = new ethers.Contract(config.contracts.usdc, this.ERC20_ABI, this.wallet);
+    const decimals = await usdce.decimals();
+    const [usdceBal, isPaused] = await Promise.all([
+      usdce.balanceOf(this.wallet.address),
+      (async () => {
+        const onrampReadOnly = new ethers.Contract(
+          config.contracts.onramp,
+          ['function paused(address _asset) view returns (bool)'],
+          this.provider,
+        );
+        try { return await onrampReadOnly.paused(config.contracts.usdc); } catch { return false; }
+      })(),
+    ]);
+
+    if (isPaused) {
+      console.log('   ⚠️  Auto-convert skipped: CollateralOnramp is paused for USDC.e');
+      return;
+    }
+
+    const usdceAvailable = parseFloat(ethers.utils.formatUnits(usdceBal, decimals));
+    const headroom = usdceAvailable - config.autoConvert.reserveUsdc;
+    const amount = Math.min(shortfall, headroom, config.autoConvert.maxPerTrade);
+
+    if (amount <= 0) {
+      console.log(
+        `   ⚠️  Auto-convert skipped: need ${shortfall.toFixed(2)} USDC.e but only ` +
+        `${Math.max(headroom, 0).toFixed(2)} available above the ${config.autoConvert.reserveUsdc} reserve ` +
+        `(cap ${config.autoConvert.maxPerTrade})`,
+      );
+      return;
+    }
+
+    console.log(`   🔄 Auto-converting ${amount.toFixed(2)} USDC.e → pUSD (shortfall ${shortfall.toFixed(2)}, reserve ${config.autoConvert.reserveUsdc}, cap ${config.autoConvert.maxPerTrade})`);
+
+    const gasOverrides = await this.getGasOverrides();
+    const amountWei = ethers.utils.parseUnits(amount.toFixed(decimals), decimals);
+
+    const usdceAllowance = await usdce.allowance(this.wallet.address, config.contracts.onramp);
+    if (usdceAllowance.lt(amountWei)) {
+      const tx = await usdce.approve(config.contracts.onramp, ethers.constants.MaxUint256, gasOverrides);
+      await tx.wait();
+    }
+
+    const onramp = new ethers.Contract(
+      config.contracts.onramp,
+      ['function wrap(address _asset, address _to, uint256 _amount)'],
+      this.wallet,
+    );
+    const wrapTx = await onramp.wrap(config.contracts.usdc, this.wallet.address, amountWei, gasOverrides);
+    await wrapTx.wait();
+    console.log(`   ✅ Converted ${amount.toFixed(2)} USDC.e → pUSD (tx: ${wrapTx.hash})`);
+
+    const pusd = new ethers.Contract(config.contracts.pusd, this.ERC20_ABI, this.wallet);
+    const pusdDecimals = await pusd.decimals();
+    const minAllowance = ethers.utils.parseUnits(config.trading.maxTradeSize.toString(), pusdDecimals);
+    const spenders = [config.contracts.exchangeV2, config.contracts.negRiskExchangeV2, config.contracts.negRiskAdapter];
+    for (const spender of spenders) {
+      const allowance = await pusd.allowance(this.wallet.address, spender);
+      if (allowance.lt(minAllowance)) {
+        const tx = await pusd.approve(spender, ethers.constants.MaxUint256, gasOverrides);
+        await tx.wait();
+      }
+    }
+  }
+
+
   /** Place a FOK market-sell for all shares of a position. */
   async exitPosition(tokenId: string, shares: number): Promise<CopyExecutionResult> {
     console.log(`🔴 Exiting position: ${shares} shares of token ${tokenId}`);

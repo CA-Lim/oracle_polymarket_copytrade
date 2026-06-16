@@ -9,7 +9,7 @@ import { PolymarketCopyBot } from './index.js';
 import { config } from './config.js';
 import { copyTargetManager } from './copy-target-manager.js';
 import { TradeExecutor } from './trader.js';
-import { initDb, initLogger, insertTrade, insertRedeem, getPool } from './db.js';
+import { initDb, initLogger, insertTrade, insertRedeem, getPool, saveAutoConvertSettings } from './db.js';
 import cron from 'node-cron';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -497,6 +497,9 @@ async function broadcastSnapshot() {
       slippageTolerance: config.trading.slippageTolerance,
       maxPerMarketNotional: config.risk.maxPerMarketNotional,
       maxSessionNotional: config.risk.maxSessionNotional,
+      autoConvertEnabled: config.autoConvert.enabled,
+      autoConvertReserveUsdc: config.autoConvert.reserveUsdc,
+      autoConvertMaxPerTrade: config.autoConvert.maxPerTrade,
     },
   });
 }
@@ -660,6 +663,9 @@ const server = http.createServer(async (req, res) => {
         maxSessionNotional: config.risk.maxSessionNotional,
         blockKeywords: config.filters.blockKeywords,
         allowKeywords: config.filters.allowKeywords,
+        autoConvertEnabled: config.autoConvert.enabled,
+        autoConvertReserveUsdc: config.autoConvert.reserveUsdc,
+        autoConvertMaxPerTrade: config.autoConvert.maxPerTrade,
       });
     }
 
@@ -735,6 +741,32 @@ const server = http.createServer(async (req, res) => {
           allowKeywords: config.filters.allowKeywords,
         },
       });
+    }
+
+    // ── Auto-convert (USDC.e → pUSD) settings ──────────────────────────────────
+
+    // GET /api/auto-convert-settings
+    if (req.method === 'GET' && pathname === '/api/auto-convert-settings') {
+      return json(res, 200, {
+        enabled: config.autoConvert.enabled,
+        reserveUsdc: config.autoConvert.reserveUsdc,
+        maxPerTrade: config.autoConvert.maxPerTrade,
+      });
+    }
+
+    // POST /api/auto-convert-settings  (body: { enabled?, reserveUsdc?, maxPerTrade? })
+    if (req.method === 'POST' && pathname === '/api/auto-convert-settings') {
+      const body = await readBody(req);
+      const next = {
+        enabled: body.enabled !== undefined ? !!body.enabled : config.autoConvert.enabled,
+        reserveUsdc: body.reserveUsdc !== undefined ? Math.max(0, parseFloat(body.reserveUsdc)) : config.autoConvert.reserveUsdc,
+        maxPerTrade: body.maxPerTrade !== undefined ? Math.max(0, parseFloat(body.maxPerTrade)) : config.autoConvert.maxPerTrade,
+      };
+      if (Number.isNaN(next.reserveUsdc) || Number.isNaN(next.maxPerTrade)) {
+        return json(res, 400, { error: 'reserveUsdc and maxPerTrade must be numbers' });
+      }
+      await saveAutoConvertSettings(next);
+      return json(res, 200, { ok: true, ...next });
     }
 
     // ── Copy Targets ──────────────────────────────────────────────────────────
@@ -1075,6 +1107,9 @@ wss.on('connection', async (ws, req) => {
       slippageTolerance: config.trading.slippageTolerance,
       maxPerMarketNotional: config.risk.maxPerMarketNotional,
       maxSessionNotional: config.risk.maxSessionNotional,
+      autoConvertEnabled: config.autoConvert.enabled,
+      autoConvertReserveUsdc: config.autoConvert.reserveUsdc,
+      autoConvertMaxPerTrade: config.autoConvert.maxPerTrade,
     },
   }));
 });

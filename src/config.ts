@@ -45,6 +45,15 @@ export const config = {
     maxPerMarketNotional: parseFloat(process.env.MAX_PER_MARKET_NOTIONAL || '0'),
   },
 
+  // Auto-convert USDC.e → pUSD when a trade needs more pUSD than is on hand.
+  autoConvert: {
+    enabled: process.env.AUTO_CONVERT_USDC !== 'false',
+    // Never convert USDC.e below this balance — keeps a manual reserve untouched.
+    reserveUsdc: parseFloat(process.env.AUTO_CONVERT_RESERVE_USDC || '0'),
+    // Hard cap on how much USDC.e can be auto-converted for a single trade.
+    maxPerTrade: parseFloat(process.env.AUTO_CONVERT_MAX_PER_TRADE || '50'),
+  },
+
   monitoring: {
     pollInterval: parseInt(process.env.POLL_INTERVAL || '2000'),
     useWebSocket,
