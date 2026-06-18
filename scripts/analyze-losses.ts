@@ -1,7 +1,11 @@
 /**
  * Run against production DB to diagnose losses since yesterday.
- * Usage: DATABASE_URL=<prod-url> npx tsx scripts/analyze-losses.ts
+ * Usage: npx tsx scripts/analyze-losses.ts
+ * Reads DATABASE_URL from .env automatically.
  */
+
+import dotenv from 'dotenv';
+dotenv.config();
 
 import pg from 'pg';
 
