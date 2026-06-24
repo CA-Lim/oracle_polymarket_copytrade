@@ -982,6 +982,68 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { snapshots: result.rows });
     }
 
+    // GET /api/daily-summary
+    if (req.method === 'GET' && pathname === '/api/daily-summary') {
+      const pool = getPool();
+      if (!pool) return json(res, 503, { error: 'Database not available' });
+      const days = Math.min(parseInt(url.searchParams.get('days') || '30'), 365);
+
+      const result = await pool.query(
+        `WITH daily_trades AS (
+           SELECT
+             DATE(ts AT TIME ZONE 'UTC') AS day,
+             COUNT(*)                    AS trade_count,
+             SUM(COALESCE(entry_cost,0)) AS total_invested
+           FROM trades
+           WHERE side = 'BUY' AND status = 'filled'
+             AND ts >= NOW() - ($1 || ' days')::INTERVAL
+           GROUP BY DATE(ts AT TIME ZONE 'UTC')
+         ),
+         market_costs AS (
+           SELECT condition_id, SUM(COALESCE(entry_cost,0)) AS total_invested
+           FROM trades
+           WHERE condition_id <> '' AND side = 'BUY' AND status = 'filled'
+           GROUP BY condition_id
+         ),
+         daily_redeems AS (
+           SELECT
+             DATE(r.ts AT TIME ZONE 'UTC') AS day,
+             COUNT(*)                       AS resolved_count,
+             COUNT(*) FILTER (WHERE r.received > COALESCE(mc.total_invested,0)) AS win_count,
+             COUNT(*) FILTER (WHERE r.received <= COALESCE(mc.total_invested,0)) AS loss_count,
+             SUM(r.received - COALESCE(mc.total_invested,0))                     AS realized_pnl
+           FROM redeems r
+           LEFT JOIN market_costs mc ON mc.condition_id = r.condition_id
+           WHERE r.ts >= NOW() - ($1 || ' days')::INTERVAL
+           GROUP BY DATE(r.ts AT TIME ZONE 'UTC')
+         )
+         SELECT
+           COALESCE(dt.day, dr.day)            AS trade_date,
+           COALESCE(dt.trade_count, 0)         AS trade_count,
+           COALESCE(dt.total_invested, 0)      AS total_invested,
+           COALESCE(dr.resolved_count, 0)      AS resolved_count,
+           COALESCE(dr.win_count, 0)           AS win_count,
+           COALESCE(dr.loss_count, 0)          AS loss_count,
+           COALESCE(dr.realized_pnl, 0)        AS realized_pnl
+         FROM daily_trades dt
+         FULL OUTER JOIN daily_redeems dr ON dr.day = dt.day
+         ORDER BY trade_date DESC`,
+        [days]
+      );
+
+      return json(res, 200, {
+        rows: result.rows.map((r: any) => ({
+          trade_date:     r.trade_date,
+          trade_count:    Number(r.trade_count),
+          total_invested: parseFloat(r.total_invested),
+          resolved_count: Number(r.resolved_count),
+          win_count:      Number(r.win_count),
+          loss_count:     Number(r.loss_count),
+          realized_pnl:   parseFloat(r.realized_pnl),
+        })),
+      });
+    }
+
     // GET /api/trade-summary
     if (req.method === 'GET' && pathname === '/api/trade-summary') {
       const pool = getPool();
