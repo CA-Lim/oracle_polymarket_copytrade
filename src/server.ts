@@ -1005,28 +1005,42 @@ const server = http.createServer(async (req, res) => {
            WHERE condition_id <> '' AND side = 'BUY' AND status = 'filled'
            GROUP BY condition_id
          ),
-         daily_redeems AS (
+         daily_wins AS (
            SELECT
-             DATE(r.ts AT TIME ZONE 'UTC') AS day,
-             COUNT(*)                       AS resolved_count,
-             COUNT(*) FILTER (WHERE r.received > COALESCE(mc.total_invested,0)) AS win_count,
-             COUNT(*) FILTER (WHERE r.received <= COALESCE(mc.total_invested,0)) AS loss_count,
-             SUM(r.received - COALESCE(mc.total_invested,0))                     AS realized_pnl
+             DATE(r.ts AT TIME ZONE 'UTC')                  AS day,
+             COUNT(*)                                        AS win_count,
+             SUM(r.received - COALESCE(mc.total_invested,0)) AS win_pnl
            FROM redeems r
            LEFT JOIN market_costs mc ON mc.condition_id = r.condition_id
            WHERE r.ts >= NOW() - ($1 || ' days')::INTERVAL
            GROUP BY DATE(r.ts AT TIME ZONE 'UTC')
+         ),
+         daily_losses AS (
+           SELECT
+             DATE(l.ts AT TIME ZONE 'UTC') AS day,
+             COUNT(*)                       AS loss_count,
+             SUM(l.entry_cost)              AS loss_cost
+           FROM losses l
+           WHERE l.ts >= NOW() - ($1 || ' days')::INTERVAL
+           GROUP BY DATE(l.ts AT TIME ZONE 'UTC')
+         ),
+         all_days AS (
+           SELECT day FROM daily_trades
+           UNION SELECT day FROM daily_wins
+           UNION SELECT day FROM daily_losses
          )
          SELECT
-           COALESCE(dt.day, dr.day)            AS trade_date,
-           COALESCE(dt.trade_count, 0)         AS trade_count,
-           COALESCE(dt.total_invested, 0)      AS total_invested,
-           COALESCE(dr.resolved_count, 0)      AS resolved_count,
-           COALESCE(dr.win_count, 0)           AS win_count,
-           COALESCE(dr.loss_count, 0)          AS loss_count,
-           COALESCE(dr.realized_pnl, 0)        AS realized_pnl
-         FROM daily_trades dt
-         FULL OUTER JOIN daily_redeems dr ON dr.day = dt.day
+           d.day                                                      AS trade_date,
+           COALESCE(dt.trade_count, 0)                               AS trade_count,
+           COALESCE(dt.total_invested, 0)                            AS total_invested,
+           COALESCE(dw.win_count, 0)                                 AS win_count,
+           COALESCE(dl.loss_count, 0)                                AS loss_count,
+           COALESCE(dw.win_count,0) + COALESCE(dl.loss_count,0)     AS resolved_count,
+           COALESCE(dw.win_pnl, 0) - COALESCE(dl.loss_cost, 0)     AS realized_pnl
+         FROM all_days d
+         LEFT JOIN daily_trades  dt ON dt.day = d.day
+         LEFT JOIN daily_wins    dw ON dw.day = d.day
+         LEFT JOIN daily_losses  dl ON dl.day = d.day
          ORDER BY trade_date DESC`,
         [days]
       );

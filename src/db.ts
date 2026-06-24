@@ -42,6 +42,16 @@ CREATE TABLE IF NOT EXISTS redeems (
 CREATE INDEX IF NOT EXISTS redeems_condition_id_idx ON redeems (condition_id);
 CREATE INDEX IF NOT EXISTS redeems_ts_idx           ON redeems (ts DESC);
 
+CREATE TABLE IF NOT EXISTS losses (
+  id           BIGSERIAL     PRIMARY KEY,
+  ts           TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  condition_id TEXT          NOT NULL UNIQUE,
+  label        TEXT          NOT NULL DEFAULT '',
+  entry_cost   NUMERIC(18,6) NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS losses_ts_idx           ON losses (ts DESC);
+CREATE INDEX IF NOT EXISTS losses_condition_id_idx ON losses (condition_id);
+
 CREATE TABLE IF NOT EXISTS logs (
   id      BIGSERIAL   PRIMARY KEY,
   ts      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -239,6 +249,44 @@ export function insertTrade(record: {
       record.sourceAddress ?? '',
     ]
   ).catch(e => process.stderr.write(`⚠️  insertTrade error: ${e.message}\n`));
+}
+
+export async function insertLoss(params: {
+  conditionId: string;
+  label: string;
+  entryCost: number;
+}): Promise<boolean> {
+  if (!pool) return false;
+  const result = await pool.query(
+    `INSERT INTO losses (condition_id, label, entry_cost)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (condition_id) DO NOTHING`,
+    [params.conditionId, params.label, params.entryCost]
+  ).catch(e => { process.stderr.write(`⚠️  insertLoss error: ${e.message}\n`); return null; });
+  return (result?.rowCount ?? 0) > 0;
+}
+
+export async function isAlreadySettled(conditionId: string): Promise<boolean> {
+  if (!pool) return false;
+  const result = await pool.query(
+    `SELECT 1 FROM redeems WHERE condition_id = $1
+     UNION ALL
+     SELECT 1 FROM losses WHERE condition_id = $1
+     LIMIT 1`,
+    [conditionId]
+  );
+  return (result?.rowCount ?? 0) > 0;
+}
+
+export async function getEntryCostForCondition(conditionId: string): Promise<number> {
+  if (!pool) return 0;
+  const result = await pool.query(
+    `SELECT COALESCE(SUM(entry_cost), 0) AS total
+     FROM trades
+     WHERE condition_id = $1 AND side = 'BUY' AND status = 'filled'`,
+    [conditionId]
+  );
+  return parseFloat(result.rows[0]?.total ?? '0');
 }
 
 export function insertRedeem(params: {

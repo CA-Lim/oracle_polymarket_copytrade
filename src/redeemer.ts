@@ -1,6 +1,6 @@
 import { ethers } from 'ethers';
 import { config } from './config.js';
-import { insertRedeem } from './db.js';
+import { insertRedeem, insertLoss, isAlreadySettled, getEntryCostForCondition } from './db.js';
 
 const WCOL = '0x3A3BD7bb9528E159577F7C2e685CC81A765002E2';
 
@@ -191,6 +191,23 @@ export class AutoRedeemer {
         console.log(`   ✅ Redeemed (+$${condReceived.toFixed(4)} USDC.e)`);
       } catch (e: any) {
         console.error(`   ❌ Failed to redeem "${label}": ${e.reason ?? e.message}`);
+      }
+    }
+
+    // Detect losing positions: price < 0.01 means the market resolved against us.
+    const potentialLosses = positions.filter(
+      p => p.conditionId
+        && parseFloat(p.curPrice ?? 1) < 0.01
+        && !this.redeemed.has(p.conditionId)
+    );
+    for (const p of potentialLosses) {
+      if (await isAlreadySettled(p.conditionId)) continue;
+      const entryCost = await getEntryCostForCondition(p.conditionId);
+      if (entryCost <= 0) continue; // not a trade we copied — skip
+      const label = (p.title ?? p.conditionId).slice(0, 65);
+      const logged = await insertLoss({ conditionId: p.conditionId, label, entryCost });
+      if (logged) {
+        console.log(`📉 Loss logged: "${label}" — invested $${entryCost.toFixed(2)}`);
       }
     }
 
