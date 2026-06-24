@@ -468,6 +468,58 @@
       </div>
     </div>
 
+    <!-- ── DAILY SUMMARY ─────────────────────────────────────────────────── -->
+    <div class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+      <div class="px-4 py-3 border-b border-gray-800 flex items-center justify-between">
+        <h2 class="font-semibold text-white">Daily Summary</h2>
+        <div class="flex items-center gap-3">
+          <span class="text-xs text-gray-500" x-text="'Last ' + tradeSummaryDays + ' days'"></span>
+        </div>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full">
+          <thead>
+            <tr class="text-xs text-gray-500 bg-gray-950/40">
+              <th class="px-4 py-2.5 text-left font-medium">Date</th>
+              <th class="px-4 py-2.5 text-right font-medium">Successful Trades</th>
+              <th class="px-4 py-2.5 text-right font-medium">Won</th>
+              <th class="px-4 py-2.5 text-right font-medium">Lost</th>
+              <th class="px-4 py-2.5 text-right font-medium">Pending</th>
+              <th class="px-4 py-2.5 text-right font-medium">Total Invested</th>
+              <th class="px-4 py-2.5 text-right font-medium">Realized P&amp;L</th>
+              <th class="px-4 py-2.5 text-right font-medium">Positions Value</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-if="tradeSummaryLoading">
+              <tr><td colspan="8" class="px-4 py-10 text-center text-gray-600">Loading…</td></tr>
+            </template>
+            <template x-if="!tradeSummaryLoading && dailySummaryRows.length === 0">
+              <tr><td colspan="8" class="px-4 py-10 text-center text-gray-600">No trade data in this period</td></tr>
+            </template>
+            <template x-for="day in dailySummaryRows" :key="day.date">
+              <tr class="border-t border-gray-800/60 hover:bg-gray-800/20 transition-colors">
+                <td class="px-4 py-2.5 text-gray-300 font-mono whitespace-nowrap font-semibold" x-text="day.date"></td>
+                <td class="px-4 py-2.5 text-right text-white font-bold font-mono" x-text="day.trade_count"></td>
+                <td class="px-4 py-2.5 text-right text-green-400 font-semibold" x-text="day.win_count"></td>
+                <td class="px-4 py-2.5 text-right text-red-400 font-semibold" x-text="day.loss_count"></td>
+                <td class="px-4 py-2.5 text-right text-yellow-500" x-text="day.pending_count"></td>
+                <td class="px-4 py-2.5 text-right text-gray-400 font-mono"
+                    x-text="'$' + day.total_invested.toFixed(2)"></td>
+                <td class="px-4 py-2.5 text-right font-semibold font-mono"
+                    :class="day.realized_pnl >= 0 ? 'text-green-400' : 'text-red-400'"
+                    x-text="(day.realized_pnl >= 0 ? '+$' : '-$') + Math.abs(day.realized_pnl).toFixed(2)">
+                </td>
+                <td class="px-4 py-2.5 text-right text-gray-400 font-mono"
+                    x-text="day.unrealized_value > 0 ? '$' + day.unrealized_value.toFixed(2) : '—'">
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
     <!-- ── TRADE SUMMARY BY WALLET ────────────────────────────────────────── -->
     <div class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
       <div class="px-4 py-3 border-b border-gray-800 flex items-center justify-between">
@@ -916,6 +968,26 @@
           const posValue = (this.data.positions ?? []).reduce((s, p) => s + (p.currentValue || 0), 0);
           const usdcBal = parseFloat(this.data.balances?.pusd ?? '0') || 0;
           return '$' + (posValue + usdcBal).toFixed(2);
+        },
+        get dailySummaryRows() {
+          const map = new Map();
+          for (const row of (this.tradeSummaryRows ?? [])) {
+            const date = typeof row.trade_date === 'string'
+              ? row.trade_date.slice(0, 10)
+              : new Date(row.trade_date).toISOString().slice(0, 10);
+            if (!map.has(date)) {
+              map.set(date, { date, trade_count: 0, win_count: 0, loss_count: 0, pending_count: 0, total_invested: 0, realized_pnl: 0, unrealized_value: 0 });
+            }
+            const d = map.get(date);
+            d.trade_count     += Number(row.trade_count);
+            d.win_count       += Number(row.win_count);
+            d.loss_count      += Number(row.loss_count);
+            d.pending_count   += Number(row.pending_count);
+            d.total_invested  += Number(row.total_invested);
+            d.realized_pnl    += Number(row.realized_pnl);
+            d.unrealized_value += Number(row.unrealized_value);
+          }
+          return Array.from(map.values()).sort((a, b) => b.date.localeCompare(a.date));
         },
 
         // ── Init ──────────────────────────────────────────────────────────
