@@ -998,15 +998,16 @@ const server = http.createServer(async (req, res) => {
 
       const result = await pool.query(
         `WITH trade_costs AS (
-           SELECT source_address, condition_id,
+           SELECT source_address,
+                  NULLIF(condition_id, '') AS condition_id,
                   DATE(ts AT TIME ZONE 'UTC') AS trade_date,
                   SUM(COALESCE(entry_cost, 0)) AS total_invested,
                   COUNT(*) AS buy_count
            FROM trades
-           WHERE source_address <> '' AND condition_id <> ''
+           WHERE source_address <> ''
              AND side = 'BUY' AND status = 'filled'
              AND ts >= NOW() - ($1 || ' days')::INTERVAL
-           GROUP BY source_address, condition_id, DATE(ts AT TIME ZONE 'UTC')
+           GROUP BY source_address, NULLIF(condition_id, ''), DATE(ts AT TIME ZONE 'UTC')
          ),
          redeem_totals AS (
            SELECT condition_id, SUM(received) AS total_received
@@ -1016,10 +1017,12 @@ const server = http.createServer(async (req, res) => {
            SELECT tc.source_address, tc.trade_date, tc.condition_id,
                   tc.total_invested, tc.buy_count,
                   COALESCE(rt.total_received, 0) AS total_received,
-                  CASE WHEN rt.condition_id IS NULL THEN 'pending'
+                  CASE WHEN tc.condition_id IS NULL THEN 'pending'
+                       WHEN rt.condition_id IS NULL THEN 'pending'
                        WHEN rt.total_received > tc.total_invested THEN 'win'
                        ELSE 'loss' END AS result,
-                  CASE WHEN rt.condition_id IS NULL THEN 0
+                  CASE WHEN tc.condition_id IS NULL THEN 0
+                       WHEN rt.condition_id IS NULL THEN 0
                        ELSE rt.total_received - tc.total_invested END AS realized_pnl
            FROM trade_costs tc
            LEFT JOIN redeem_totals rt ON rt.condition_id = tc.condition_id
@@ -1032,7 +1035,7 @@ const server = http.createServer(async (req, res) => {
                 SUM(total_invested)                               AS total_invested,
                 SUM(CASE WHEN result <> 'pending' THEN total_received ELSE 0 END) AS total_received,
                 SUM(CASE WHEN result <> 'pending' THEN realized_pnl ELSE 0 END)   AS realized_pnl,
-                ARRAY_AGG(condition_id) FILTER (WHERE result = 'pending') AS pending_condition_ids
+                ARRAY_AGG(condition_id) FILTER (WHERE result = 'pending' AND condition_id IS NOT NULL) AS pending_condition_ids
          FROM classified
          GROUP BY source_address, trade_date
          ORDER BY trade_date DESC, source_address`,
